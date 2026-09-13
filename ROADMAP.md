@@ -328,6 +328,15 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 
 ## 9. Nightly Development 记录
 
+### 2026-09-13/14 夜班:NC3 收官 + NC9 学习质量闭环 + 失败语义修订
+
+- **NC3 overlay 联动 ✅**:dry-run debug PNG 画出 L0 探针区域(触发=绿/未触发=灰描边)+文件名状态标签;`stroke_rect` 循环钳制(巨矩形区域 footgun,与 drag-steps clamp 同族)— `6472fe3`。
+- **NC9 可中断恢复 ✅(验收 #3)**:learn_route 流式化(内存随场景数而非时长)+ checkpoint/`--resume`,CLI 级中断→resume 与一次性草案逐字节等价 — `732f986`。
+- **NC9 学习质量修复(验收 #2 真值闭环)**:300s soak 抓出链式夹具 skill 卡 step_01→failed 而 e2e 假绿——根因:主色取均值混出不存在的颜色(探针永不触发)+锚点含上一场景消失侧残影(0.75×0.75 每帧误触发);修复=锚点只留新内容块(以段 0 众数为背景估计)+主色取众数;e2e 断言轨迹真到 done,selftest 校验探针「自己段帧能触发+上段不触发」— `035c0e0`。
+- **NC6 RESULT 语义修订**:skill 终态失败→RESULT outcome=failed(error 注明失败状态),不再因会话跑满时长而记 done——Go 侧重试/失败通知/失败截图/NC7 反馈统计全部依赖该映射;成功路径不变;Go 边界映射有测试钉住 — `5e5a02e`/`bc64f96`。
+- 其余:EVENT→SSE 暂缓复核(量化:900 周期 2 EVENT,稀疏性确认);NIGHTLY VERIFY 全电池 PASS;win-devops 远端验收 PASS。
+
+
 ### 2026-09-08/09 夜班:NC0 全部完成 ✅
 
 - **M1** ✅:`controller/` Rust crate 骨架 + GameWindow(HWND 枚举 / 精确 client rect / per-monitor-v2 DPI / ClientToScreen / foreground / 变化检测)— `60f0719`。
