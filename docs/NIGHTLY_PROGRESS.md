@@ -9,11 +9,13 @@
 近期落地：终端 rec 防护、非覆盖式 upsert、origin guard、ctl delete/depth。
 **2026-09-08 夜班起主线切换至 Native Vision Controller（ROADMAP §9）**：
 NC0 基础 ✅ → NC1 推理运行时 ✅（运行时侧收官，仅首个真实模型待白天训练）→
+NC2 感知 🚧（L0/L1 地基 ✅，真实 UI 数据待白天）→
+NC3 状态机/技能引擎 🚧→**地基+overlay 联动 ✅**（2026-09-13/14 夜：debug PNG 画出 L0 探针区域触发态+文件名状态标签；真实业务 Skill 待 NC5）→
 NC4 输入层 ✅（SendInput+governor 硬前置，默认零输入，selftest 留操作者）→
-NC6 调度集成 ✅ 功能面收官（协议 schema v1 冻结、Go 会话执行器、native 任务分发与取消、dashboard 表单、**auto 执行器**——native 可用即走、否则回退外部命令，2026-09-11/12 夜；余 EVENT→SSE 打磨，2026-09-12/13 夜复核后维持暂缓，理由更新在案）→
-NC7 Planner 集成 ✅ **功能面收官**（2026-09-12/13 夜：skill 绑定→auto 任务、bind-after-create 回灌、**执行反馈统计**——`GET .../feedback`+ctl+看板「反馈」弹窗，只读 rollup 不自动改 owned_count；**无路线纯 skill 推荐**→纯 native 任务）→
-NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已通；**链式夹具 e2e** 入 nightly-verify，2026-09-12/13 夜；真实素材待白天）。
-环境发现：隐藏控制台启动时 GDI 捕获黑帧（已可观测化告警）；D1 终态 EVENT 恰好一次已修复并 120s soak 验证（2026-09-11/12 夜）；**win-devops 远端 CI 失败根因=节点 04:30 清理脚本按 mtime 误杀拷贝播种的 cargo 缓存**（2026-09-12/13 夜当场修复并四轮远端 PASS 复验；防复发归运维侧）。
+NC6 调度集成 ✅（协议 schema v1、Go 会话执行器、native 分发、auto 执行器；**RESULT 失败语义修订 2026-09-13/14 夜：skill 终态失败→outcome=failed**，不再因会话跑满时长记 done；余 EVENT→SSE 打磨——2026-09-13/14 夜量化复核后维持暂缓）→
+NC7 Planner 集成 ✅ 功能面收官（skill 绑定→auto/纯 native 任务、执行反馈统计只读 rollup）→
+NC9 视频学习管线 🚧（**学习质量闭环 2026-09-13/14 夜**：锚点排除消失侧+主色众数——修复探针永不/误触发导致的 walk 卡死假绿；e2e 断言轨迹真到 done；**流式化+checkpoint/--resume** 可中断恢复；真实素材待白天）。
+环境发现：隐藏控制台启动时 GDI 捕获黑帧（已可观测化告警）；D1 终态 EVENT 恰好一次已修复并多轮 soak 验证；win-devops 远端 CI 失败根因已修复（节点 cargo 缓存误杀，防复发归运维侧）；**过夜调度链 soak 挂具已入库**（scripts/soak-scheduler.ps1，2026-09-13/14 夜）。
 
 ## Candidate Backlog
 
