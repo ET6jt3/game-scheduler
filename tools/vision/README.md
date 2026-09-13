@@ -47,9 +47,12 @@ tools/vision/
 - 指标敏感性：全局均值抓整屏切换，峰值块阈值抓局部 UI 变化（弹窗/
   菜单展开只占画面几个百分点，全局均值会把它稀释掉——恰是 NC9 要抓
   的事件）。两阈值均可 CLI 调。
-- 资源形态：逐帧流式解码，降采样到 ≤64px 网格后再思考；无 GPU、无
-  模型下载、常数量级内存。`python learn_route.py --selftest` 是合成
-  端到端守护（nightly-verify 已接入）。
+- 资源形态：逐帧流式解码（一次只解一帧），降采样到 ≤64px 网格后再思考；
+  内存只随**场景数**增长（仅保留割点边界网格 + 当前帧），与录像时长无关；
+  无 GPU、无模型下载。处理状态是纯 JSON：`--checkpoint-interval N`（默认
+  100）周期落盘可恢复检查点，中断后 `--resume` 继续，最终草案与一次性运行
+  **逐字节一致**（selftest 断言；NC9 验收「批处理可中断、可恢复」）。
+  `python learn_route.py --selftest` 是合成端到端守护（nightly-verify 已接入）。
 - 链式夹具 e2e：`python pipeline_e2e.py --controller <controller.exe>`
   在临时目录生成**确定性** 4 场景合成录像（16 帧，无随机无时间戳），
   走完 learn → convert → controller replay 全链并断言 RESULT done

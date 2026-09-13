@@ -247,7 +247,7 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Acceptance Criteria**:
   - 从一条真实攻略视频(或用户提供的录屏)产出至少一个能通过严格校验、被 SkillRunner 加载的 SkillDefinition 草案;
   - 该草案在 dry-run 回放中完整走查并输出计划动作轨迹(与 NC3 轨迹日志/TSV 联动);
-  - 学习管线处理 10 分钟视频的资源占用符合 §5 预算(无 GPU、内存 <300MB、可中断恢复);
+  - 学习管线处理 10 分钟视频的资源占用符合 §5 预算(无 GPU、内存 <300MB、可中断恢复——✅ 可中断恢复 2026-09-13/14 夜:learn_route 流式化[内存随场景数而非时长]+checkpoint/`--resume`,CLI 级中断→resume 与一次性运行逐字节等价实测);
   - 实际游戏测试条目保持 deferred 标注,仅在真实环境可用后单独排期。
 - **Tests**:草案 schema 校验;关键帧检测单测(合成帧序列);字幕/文本解析单测;端到端用小体积录制视频夹具(入库,保证 CI 确定性)。
 - **Dependencies**:H2(B 站搜索/导入)✅;NC1 运行时 🚧(可用);NC2 感知 🚧(L0/L1 可用,L2/L3 按需);NC3 SkillDefinition ✅ 地基。

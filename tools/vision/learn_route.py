@@ -14,15 +14,22 @@ What this milestone deliberately does NOT do: OCR, YOLO, semantic
 labels, real-game anything. It produces the structural draft that later
 NC9 milestones annotate into SkillDefinitions (NC3 schema).
 
-Resource shape: one PNG decode per frame (streamed, constant memory
-beyond one frame + one downsampled grid). A 10-minute 1fps capture
-(~600 frames) stays in the seconds-to-tens-of-seconds range on CPU.
+Resource shape: frames are decoded ONE at a time and only the grids the
+draft actually needs stay in memory (one per scene-cut boundary plus the
+running latest) — memory scales with scene count, not capture length.
+Processing state is a plain JSON dict, so a long capture can be paused
+(`stop_after` / `--checkpoint-interval`) and resumed (`--resume`) with a
+byte-identical final draft (NC9 acceptance: 批处理可中断、可恢复).
+A 10-minute 1fps capture (~600 frames) stays in the seconds-to-
+tens-of-seconds range on CPU.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -48,6 +55,11 @@ def parse_args() -> argparse.Namespace:
                         f"changes like dialogs (default {DEFAULT_BLOCK_THRESHOLD})")
     p.add_argument("--inspect", action="store_true",
                    help="print the human-readable segment timeline")
+    p.add_argument("--checkpoint-interval", type=int, default=100,
+                   help="persist a resumable checkpoint every N frames, 0 disables "
+                        "(default 100)")
+    p.add_argument("--resume", action="store_true",
+                   help="resume from the checkpoint next to the draft output")
     p.add_argument("--selftest", action="store_true",
                    help="run the synthetic end-to-end check and exit")
     return p.parse_args()
@@ -144,50 +156,145 @@ def dominant_color(frame_path: Path, anchor: dict) -> list[int] | None:
     return [rs // n, gs // n, bs // n]
 
 
-def learn(frames_dir: Path, max_side: int, threshold: float, block_threshold: float) -> dict:
+def _grid_to_json(g) -> list | None:
+    return None if g is None else [g[0], g[1], base64.b64encode(g[2]).decode("ascii")]
+
+
+def _grid_from_json(j):
+    return None if j is None else (j[0], j[1], base64.b64decode(j[2]))
+
+
+def checkpoint_dumps(st: dict) -> str:
+    """Serialize a learn() processing state to JSON (grids b64-encoded)."""
+    out = dict(st)
+    out["retained"] = {k: _grid_to_json(g) for k, g in st["retained"].items()}
+    out["last_grid"] = _grid_to_json(st["last_grid"])
+    return json.dumps(out, sort_keys=True)
+
+
+def checkpoint_loads(s: str) -> dict:
+    """The inverse of checkpoint_dumps — grids decode back to bytes."""
+    st = json.loads(s)
+    st["retained"] = {k: _grid_from_json(g) for k, g in st["retained"].items()}
+    st["last_grid"] = _grid_from_json(st["last_grid"])
+    return st
+
+
+def learn(frames_dir: Path, max_side: int = DEFAULT_MAX_SIDE,
+          threshold: float = DEFAULT_THRESHOLD,
+          block_threshold: float = DEFAULT_BLOCK_THRESHOLD, *,
+          state: dict | None = None,
+          stop_after: int | None = None,
+          progress_every: int | None = None,
+          on_progress=None) -> tuple[dict | None, dict]:
+    """Learn a route draft from a frame directory — STREAMED.
+
+    Frames are decoded one at a time and only the grids the draft needs
+    stay in memory (one per scene-cut boundary plus the running latest),
+    so memory scales with scene count, not capture length. The whole
+    processing state is a plain dict: pass a previously returned state
+    back via `state=` to resume an interrupted run, or set `stop_after=N`
+    to process at most N more frames and pause — the call then returns
+    (None, state); persist it (checkpoint_dumps) and hand it to a later
+    call. That is the NC9 acceptance contract 批处理可中断、可恢复.
+    `progress_every` + `on_progress` expose the live state every N frames
+    for callers that persist periodic checkpoints.
+
+    Returns (draft, final_state); draft is None when the run paused early.
+    """
     frames = sorted(p for p in frames_dir.iterdir()
                     if p.is_file() and p.suffix.lower() == ".png")
     if len(frames) < 2:
         raise SystemExit(f"learn_route: need >= 2 PNG frames in {frames_dir}, found {len(frames)}")
 
-    grids = []
-    src_size = None
-    for f in frames:
-        w, h, ch, pix = pnglite.read_png(f)
-        src_size = (w, h)
-        grids.append(downsample_gray(w, h, ch, pix, max_side))
-    gw, gh, _ = grids[0]
-    for g in grids:
-        if (g[0], g[1]) != (gw, gh):
-            raise SystemExit("learn_route: frames differ in size after downsampling")
+    params = {"max_side": max_side, "threshold": threshold,
+              "block_threshold": block_threshold}
+    if state is None:
+        st = {
+            "version": 1,
+            "params": params,
+            "frame_count": len(frames),
+            "first_frame": frames[0].name,
+            "src_size": None,
+            "grid_size": None,
+            "next_index": 0,
+            "pair_stats": [],   # [mean, peak] per processed adjacent pair
+            "cuts": [],         # frame index where a new segment starts
+            "retained": {},     # segment-boundary frame index -> its grid
+            "last_grid": None,
+        }
+    else:
+        st = state
+        if st.get("version") != 1:
+            raise SystemExit("learn_route: checkpoint version mismatch")
+        if st.get("params") != params:
+            raise SystemExit("learn_route: checkpoint params differ from this run's "
+                             "--max-side/--threshold/--block-threshold")
+        if st.get("frame_count") != len(frames) or st.get("first_frame") != frames[0].name:
+            raise SystemExit("learn_route: frames directory changed since the checkpoint")
 
-    # Scene cuts: adjacent-grid change crossing EITHER threshold —
-    # global mean (full-frame swaps) or peak block (localized UI pops:
-    # a dialog opening may cover only a few percent of the frame, which a
-    # global mean would dilate away, yet it is exactly the event NC9 must
-    # catch).
-    pair_stats = []
-    for i in range(len(grids) - 1):
-        blocks = block_diffs(gw, gh, grids[i][-1], grids[i + 1][-1], DEFAULT_BLOCK)
-        mean = sum(s[0] for s in blocks) / max(1, len(blocks))
-        peak = max(s[0] for s in blocks)
-        pair_stats.append((round(mean, 2), round(peak, 2)))
-    cuts = [i + 1 for i, (mean, peak) in enumerate(pair_stats)
-            if mean > threshold or peak > block_threshold]
-    bounds = [0] + cuts + [len(grids)]
+    grid_size = st.get("grid_size")
+    target = len(frames)
+    if stop_after is not None:
+        target = min(target, st["next_index"] + max(0, stop_after))
+
+    since_progress = 0
+    while st["next_index"] < target:
+        k = st["next_index"]
+        w, h, ch, pix = pnglite.read_png(frames[k])
+        g = downsample_gray(w, h, ch, pix, st["params"]["max_side"])
+        if grid_size is None:
+            grid_size = [g[0], g[1]]
+            st["grid_size"] = grid_size
+        elif [g[0], g[1]] != grid_size:
+            raise SystemExit("learn_route: frames differ in size after downsampling")
+        gw, gh = grid_size
+        last = st["last_grid"]
+        if last is not None:
+            blocks = block_diffs(gw, gh, last[-1], g[-1], DEFAULT_BLOCK)
+            mean = sum(s[0] for s in blocks) / max(1, len(blocks))
+            peak = max(s[0] for s in blocks)
+            # Round BEFORE the cut test — the original implementation compared
+            # the stored rounded values, and comparing raw ones would flip
+            # cuts for boundary values (e.g. 6.0004 vs threshold 6.0).
+            mean = round(mean, 2)
+            peak = round(peak, 2)
+            st["pair_stats"].append([mean, peak])
+            if mean > st["params"]["threshold"] or peak > st["params"]["block_threshold"]:
+                st["cuts"].append(k)                     # frame k starts a new segment
+                st["retained"][str(k - 1)] = last        # that segment's representative grid
+        st["last_grid"] = [g[0], g[1], g[2]]
+        st["src_size"] = [w, h]
+        st["next_index"] = k + 1
+        since_progress += 1
+        if progress_every and on_progress and since_progress >= progress_every:
+            on_progress(st)
+            since_progress = 0
+
+    if st["next_index"] != len(frames):
+        if on_progress:
+            on_progress(st)  # persist progress at the pause point too
+        return None, st
+
+    # ---- complete: build the draft from the retained state ----
+    retained = {int(i): g for i, g in st["retained"].items()}
+    retained[len(frames) - 1] = st["last_grid"]
+    cuts = st["cuts"]
+    pair_stats = st["pair_stats"]
+    bounds = [0] + cuts + [len(frames)]
 
     segments = []
     for si in range(len(bounds) - 1):
         start, end = bounds[si], bounds[si + 1]
         if start >= end:
             continue
-        rep = grids[end - 1][-1]
+        rep = retained[end - 1]
         # Anchor = WHAT CHANGED when entering this segment (previous
         # segment's representative vs this one) — that difference is the
         # route step. Segment 0 has no entry, so no anchor.
         if start > 0:
-            prev_rep = grids[start - 1][-1]
-            anchor = anchor_between(gw, gh, prev_rep, rep, DEFAULT_BLOCK) or {}
+            prev_rep = retained[start - 1]
+            anchor = anchor_between(gw, gh, prev_rep[-1], rep[-1], DEFAULT_BLOCK) or {}
             if anchor:
                 # The probe layer needs a concrete color to watch for: sample
                 # the CURRENT segment's look at that region (re-reads only
@@ -208,13 +315,13 @@ def learn(frames_dir: Path, max_side: int, threshold: float, block_threshold: fl
             "anchor": anchor,
         })
 
-    return {
+    draft = {
         "schema_version": 1,
         "kind": "route-learning-draft",
         "source": {
             "frames_dir": str(frames_dir.resolve()),
-            "frame_count": len(grids),
-            "frame_size": list(src_size or (0, 0)),
+            "frame_count": len(frames),
+            "frame_size": list(st["src_size"] or (0, 0)),
         },
         "params": {"max_side": max_side, "threshold": threshold,
                    "block_threshold": block_threshold, "block": DEFAULT_BLOCK},
@@ -222,6 +329,7 @@ def learn(frames_dir: Path, max_side: int, threshold: float, block_threshold: fl
         "segment_count": len(segments),
         "segments": segments,
     }
+    return draft, st
 
 
 def selftest() -> int:
@@ -248,7 +356,7 @@ def selftest() -> int:
         for i, pix in enumerate(seq):
             pnglite.write_png(d / f"frame_{i:05d}.png", w, h, pix)
         draft = learn(d, max_side=DEFAULT_MAX_SIDE, threshold=DEFAULT_THRESHOLD,
-                      block_threshold=DEFAULT_BLOCK_THRESHOLD)
+                      block_threshold=DEFAULT_BLOCK_THRESHOLD)[0]
 
         ok = True
         if draft["segment_count"] != 2:
@@ -265,12 +373,47 @@ def selftest() -> int:
             print(f"selftest FAIL: anchor center ({cx:.2f},{cy:.2f}) not near (0.70,0.70)")
             ok = False
 
+        # checkpoint/resume equivalence (NC9 acceptance: 批处理可中断、可恢复):
+        # pause after 9 frames (past the cut at 8, so a boundary grid is
+        # retained), round-trip the state through JSON like a real checkpoint
+        # file, resume — the final draft must be byte-identical to the
+        # one-shot draft above.
+        part, half = learn(d, max_side=DEFAULT_MAX_SIDE, threshold=DEFAULT_THRESHOLD,
+                           block_threshold=DEFAULT_BLOCK_THRESHOLD, stop_after=9)
+        if part is not None or half["next_index"] != 9:
+            print(f"selftest FAIL: stop_after=9 must pause at 9 "
+                  f"(finished={part is not None}, at={half['next_index']})")
+            ok = False
+        resumed, _ = learn(d, max_side=DEFAULT_MAX_SIDE, threshold=DEFAULT_THRESHOLD,
+                           block_threshold=DEFAULT_BLOCK_THRESHOLD,
+                           state=checkpoint_loads(checkpoint_dumps(half)))
+        if resumed is None:
+            print("selftest FAIL: resumed run did not complete")
+            ok = False
+        elif json.dumps(resumed, sort_keys=True) != json.dumps(draft, sort_keys=True):
+            print("selftest FAIL: resumed draft differs from the one-shot draft")
+            ok = False
+
+        # checkpoint guards: a params mismatch or a changed frames directory
+        # must be refused, never silently accepted
+        good = checkpoint_loads(checkpoint_dumps(half))
+        bad_params = {**good, "params": {"max_side": 32, "threshold": 6.0, "block_threshold": 24.0}}
+        bad_frames = {**good, "frame_count": 999}
+        for bad_st, why in ((bad_params, "params"), (bad_frames, "frames directory")):
+            try:
+                learn(d, max_side=DEFAULT_MAX_SIDE, threshold=DEFAULT_THRESHOLD,
+                      block_threshold=DEFAULT_BLOCK_THRESHOLD, state=bad_st)
+                print(f"selftest FAIL: {why} mismatch must be refused")
+                ok = False
+            except SystemExit:
+                pass
+
         same = d / "same"
         same.mkdir()
         for i in range(10):
             pnglite.write_png(same / f"frame_{i:05d}.png", w, h, frame(w, h, False))
         draft2 = learn(same, max_side=DEFAULT_MAX_SIDE, threshold=DEFAULT_THRESHOLD,
-                       block_threshold=DEFAULT_BLOCK_THRESHOLD)
+                       block_threshold=DEFAULT_BLOCK_THRESHOLD)[0]
         if draft2["segment_count"] != 1:
             print(f"selftest FAIL: static sequence must not split, got {draft2['segment_count']}")
             ok = False
@@ -285,7 +428,8 @@ def selftest() -> int:
             ok = False
 
         if ok:
-            print("learn_route selftest: PASS (2-segment split at 8, anchor ~(0.7,0.7), static no-split, PNG round-trip)")
+            print("learn_route selftest: PASS (2-segment split at 8, anchor ~(0.7,0.7), static no-split, "
+                  "resume==one-shot draft, checkpoint guards, PNG round-trip)")
             return 0
         return 1
 
@@ -298,8 +442,32 @@ def main() -> int:
     if frames_dir is None or not frames_dir.is_dir():
         print("learn_route: ERROR provide a frames directory (or --selftest)", file=sys.stderr)
         return 2
-    draft = learn(frames_dir, args.max_side, args.threshold, args.block_threshold)
     out = Path(args.out) if args.out else frames_dir / "route-draft.json"
+    ckpt = out.with_name(out.stem + ".checkpoint.json")
+
+    state = None
+    if args.resume:
+        if not ckpt.exists():
+            print(f"learn_route: ERROR --resume but no checkpoint at {ckpt}", file=sys.stderr)
+            return 2
+        state = checkpoint_loads(ckpt.read_text(encoding="utf-8"))
+        print(f"learn_route: resuming from frame {state['next_index']}/{state['frame_count']}")
+
+    def save_checkpoint(st: dict) -> None:
+        tmp = ckpt.with_suffix(".tmp")
+        tmp.write_text(checkpoint_dumps(st), encoding="utf-8")
+        os.replace(tmp, ckpt)
+
+    draft, st = learn(frames_dir, args.max_side, args.threshold, args.block_threshold,
+                      state=state,
+                      progress_every=(args.checkpoint_interval or None),
+                      on_progress=(save_checkpoint if args.checkpoint_interval else None))
+    if draft is None:
+        print(f"learn_route: interrupted at frame {st['next_index']}/{st['frame_count']} — "
+              f"resume with --resume (checkpoint {ckpt})", file=sys.stderr)
+        return 3
+    if ckpt.exists():
+        ckpt.unlink()
     out.write_text(json.dumps(draft, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"learn_route: {draft['source']['frame_count']} frames -> "
           f"{draft['segment_count']} segment(s), grid {draft['grid']['w']}x{draft['grid']['h']}")
