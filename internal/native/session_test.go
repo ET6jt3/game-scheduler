@@ -55,6 +55,11 @@ func runFakeController(script string) {
 		say(`{"v":2,"seq":0,"ts":"t0","type":"HELLO","payload":{"protocol_version":2,"controller_version":"future"}}`)
 		// keep the process alive briefly so the failure is the parse, not EOF
 		time.Sleep(5 * time.Second)
+	case "skillfail":
+		say(helloLine())
+		say(readyLine())
+		say(eventLine(2, 1, "step_00"))
+		say(`{"v":1,"seq":3,"ts":"t9","type":"RESULT","payload":{"outcome":"failed","state":"step_01","cycles":5,"inference_count":1,"cache_hits":2,"error":"skill failed in state step_01"}}`)
 	case "badkind":
 		say(helloLine())
 		say(`{"v":1,"seq":2,"ts":"t","type":"NUKE","payload":{}}`)
@@ -157,6 +162,23 @@ func TestRunSessionUnknownKindFailsFast(t *testing.T) {
 	var pe *ParseError
 	if !errors.As(res.Err, &pe) || pe.Kind != "kind" {
 		t.Fatalf("err = %v, want kind ParseError", res.Err)
+	}
+}
+
+// 2026-09-13/14 controller revision: a terminally failed skill arrives as
+// RESULT outcome=failed with the failing state named in error. It must map
+// to SessionFailed (Execution failed downstream) — never to success — or
+// the scheduler's retries, failure notify and feedback rollup all go blind.
+func TestRunSessionSkillFailureIsFailed(t *testing.T) {
+	res := runSession(t, "skillfail", SessionConfig{}, nil)
+	if res.Outcome != SessionFailed {
+		t.Fatalf("outcome = %v, want failed", res.Outcome)
+	}
+	if res.State != "step_01" {
+		t.Fatalf("state = %q, want the failing state step_01", res.State)
+	}
+	if res.Err != nil {
+		t.Fatalf("a failed skill is a business termination, not an infra error: %v", res.Err)
 	}
 }
 
