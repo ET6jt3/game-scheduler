@@ -638,6 +638,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     // D1: terminal skill outcomes (Done/Failed) repeat every cycle from the
     // engine, but only the FIRST one is a semantic change worth an EVENT.
     let mut skill_terminal_emitted = false;
+    // The state the skill failed in — surfaces in the RESULT outcome so a
+    // doomed skill cannot be reported as a clean session (see RESULT below).
+    let mut skill_failed_state: Option<String> = None;
     let mut limiter = match FpsLimiter::new(opts.fps, std::time::Instant::now) {
         Ok(l) => l,
         Err(e) => {
@@ -904,6 +907,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                             &[],
                         );
                         skill_terminal_emitted = true;
+                        skill_failed_state = Some(runner.current().to_string());
                     }
                 }
             }
@@ -1066,6 +1070,19 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
     // NC6 wire mode: exactly one RESULT before exit. Governor stop and
     // input-blocked are in-band terminations (stopped); degraded inference
     // is a skill failure; a clean walk is done.
+    //
+    // A skill that terminally FAILED is a failed RUN for the scheduler —
+    // its retries, failure notify, failure screenshots and feedback stats
+    // all key off Execution status, so the outcome must not dress the run
+    // up as done just because the wall clock ran out. Safety stops keep
+    // precedence: the governor's reason is the more urgent signal, and the
+    // skill failure is still in the EVENT trail and session TSV.
+    let outcome =
+        if skill_failed_state.is_some() && outcome != "stopped" && outcome != "input-blocked" {
+            "skill-failed"
+        } else {
+            outcome
+        };
     let skill_state = skill_runner
         .as_ref()
         .map(|r| r.current())
@@ -1076,6 +1093,9 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         cycle,
         detector.inference_count() as u32,
         detector.hits as u32,
+        skill_failed_state
+            .as_deref()
+            .map(|st| format!("skill failed in state {st}")),
     );
     eprintln!(
         "dry-run: finished - cycles={cycle} allowed={allowed_count} distinct_verdicts={} inference={} (cache hits={}) input_sent={input_executed} input_vetoed={input_vetoed}",
@@ -1588,9 +1608,10 @@ impl ProtocolEmitter {
         cycles: u32,
         inference_count: u32,
         cache_hits: u32,
+        skill_error: Option<String>,
     ) {
         use controller::protocol::{Outcome, ResultPayload};
-        let (wire, err) = match outcome {
+        let (wire, mut err) = match outcome {
             "completed" => (Outcome::Done, None),
             "stopped" => (Outcome::Stopped, None),
             "input-blocked" => (
@@ -1598,8 +1619,14 @@ impl ProtocolEmitter {
                 Some("input blocked by governor".to_string()),
             ),
             "inference-degraded" => (Outcome::Failed, Some("inference degraded".to_string())),
+            // Terminal skill failure: the run did not do its job even though
+            // the session itself ran cleanly to its term.
+            "skill-failed" => (Outcome::Failed, None),
             other => (Outcome::Failed, Some(format!("unknown outcome {other}"))),
         };
+        if skill_error.is_some() {
+            err = skill_error;
+        }
         self.emit(controller::protocol::Payload::Result(ResultPayload {
             outcome: wire,
             state: state.to_string(),

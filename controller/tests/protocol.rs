@@ -232,7 +232,7 @@ fn failed_skill_event_emits_once() {
 
     let mut failed_events = 0;
     let mut events = 0;
-    let mut last_was_result_done = false;
+    let mut result_seen: Option<controller::protocol::ResultPayload> = None;
     for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
         let msg = controller::protocol::Envelope::parse(line)
             .unwrap_or_else(|e| panic!("protocol violation: {e} — {line}"));
@@ -244,14 +244,29 @@ fn failed_skill_event_emits_once() {
                 }
             }
             controller::protocol::Payload::Result(r) => {
-                last_was_result_done = r.outcome == controller::protocol::Outcome::Done;
+                result_seen = Some(r);
             }
             _ => {}
         }
     }
+    // 2026-09-13/14 night revision: a terminally failed skill is a FAILED
+    // run. The scheduler's retries / failure notify / failure screenshots /
+    // feedback rollup all key off Execution status, so the RESULT must not
+    // report Done just because the session itself ran cleanly to its term.
+    // (Previously this test pinned outcome=done — that let a stuck walk
+    // surface as a green execution in the dashboard.)
+    let r = result_seen.expect("RESULT line");
+    assert_eq!(
+        r.outcome,
+        controller::protocol::Outcome::Failed,
+        "a doomed skill must surface as a failed run"
+    );
     assert!(
-        last_was_result_done,
-        "the session runs to its duration end: RESULT outcome stays completed/done"
+        r.error
+            .as_deref()
+            .is_some_and(|e| e.contains("skill failed in state")),
+        "RESULT error must name the skill failure, got {:?}",
+        r.error
     );
     assert_eq!(
         failed_events, 1,

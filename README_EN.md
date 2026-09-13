@@ -279,8 +279,11 @@ The SafetyGovernor stays the per-action authority (HWND identity, foreground,
 rate, same-point guard). Night/unattended work keeps everything off.
 
 **RESULT → execution mapping**: done → success; failed/stopped → failed
-(a governor stop is an in-band termination); cancel/timeout match the
-external-task semantics. Session TSVs land under `<data_dir>/native/`, the
+(a governor stop is an in-band termination); **a terminally failed skill →
+failed** (the error field names the failing state; revised 2026-09-13/14 —
+a run that did not do its job must not be recorded as success just because
+the session ran to its term); cancel/timeout match the external-task
+semantics. Session TSVs land under `<data_dir>/native/`, the
 EVENT trail is stored in the execution's stdout field.
 
 Learning pipeline (NC9): `tools/vision/learn_route.py` +

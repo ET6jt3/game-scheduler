@@ -586,7 +586,7 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
 
 **输入双闸**:真实键鼠输入需要 任务参数 `allow_input:true` **且** `dry_run:false` **且** config `native_allow_input:true` 三者同时成立;SafetyGovernor 仍是逐动作最终裁决(HWND 身份/前台/频率/同点连击)。夜班与无人值守场景默认全关。
 
-**RESULT→执行状态映射**:done→success;failed/stopped→failed(governor 停止属业务终态);cancel/timeout 与外部任务语义一致。会话 TSV 落在 `<data_dir>/native/exec-<id>.tsv`,EVENT 轨迹进执行记录 stdout 字段。
+**RESULT→执行状态映射**:done→success;failed/stopped→failed(governor 停止属业务终态);**skill 终态失败→failed**(error 注明失败状态,2026-09-13/14 夜修订——失败不得因会话跑满时长而记成 success);cancel/timeout 与外部任务语义一致。会话 TSV 落在 `<data_dir>/native/exec-<id>.tsv`,EVENT 轨迹进执行记录 stdout 字段。
 
 学习管线(NC9):`tools/vision/learn_route.py` + `draft_to_skill.py` 可从录制帧离线产出 skill/probes 草案(见 tools/vision/README.md)。完整上手路径见 [docs/native-quickstart.md](docs/native-quickstart.md)。
 
