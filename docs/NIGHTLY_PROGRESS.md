@@ -27,6 +27,22 @@ NC9 视频学习管线 🚧（帧→draft→skill→回放 DONE 最小闭环已�
 
 ## Night Runs
 
+### Night 2026-09-13 → 2026-09-14（夜班 agent 记录）
+
+Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a111fb1=本地 HEAD,dispatch_at=23:35,window 23:00-09:00;prompt GB18030 混编码含 1 字节截断,清洗后完整执行）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0,含 govulncheck/gosec/secret 扫描全绿）。
+
+**Discovery Pass #1**（00:00 前后）:
+- 候选:①NC3 overlay 联动（ROADMAP 明文 deferred 项）②上夜 NC7 新代码审计 ③soak 轮换 ④EVENT→SSE defer 复核 ⑤NC9 视频抽帧 wrapper（本机无 ffmpeg,测试性弱,降级）;
+- 审计上夜 NC7 全部新代码面（RecommendationFeedback 聚合/CreateTaskForRecommendation 竞态守卫/ensureRecommendationTask 纯 native 路径/CountExecutions）:**零 P0/P1**;
+- 安全三件套随基线 CI 全绿。
+
+| M | 内容 | Verdict | Commit | 验收证据 |
+|---|------|---------|--------|----------|
+| M1 | NC3 overlay 联动收官:dry-run debug PNG 画出每个 L0 探针区域（触发=亮绿描边,未触发=暗灰描边）,文件名状态标签既有——调试翻帧现在同时可读「状态时间线」与「转移原因」;`stroke_rect` 循环钳制到帧内（**敌意复审真发现**:u32::MAX 尺寸的探针区域会让描边空转数十亿次,与 M20b drag-steps 同族 footgun;无界实现下新测试会直接挂死）+完全出画的边不画幽灵线;修复前后帧内像素完全一致 | PASS | 6472fe3 | 137 测试（+4:配色/裁剪/实评端到端/巨矩形有界+无幽灵）;clippy 0;链式夹具实机 --debug-dir 会话 RESULT done,pnglite 像素验证 1112 绿/137 灰描边,修复前后一致;LOCAL CI PASS |
+
+**known issues**: 无新增。**deferred**: ⑤NC9 视频 wrapper 待有 ffmpeg 的环境。**next**: M2 learn_route 流式化+checkpoint/resume（NC9 验收 #3「可中断恢复」+修复 README「常量内存」与全网格驻留的实现漂移——2h@1fps=7200 帧网格驻留逼近 §5 预算）。
+
+
 ### Night 2026-09-12 → 2026-09-13（夜班 agent 记录）
 
 - Handoff：XNightOps `2026-09-12/game-scheduler` 验证通过（night/project/workspace=本仓/git_head=a29670b 全一致；dispatch_at=23:35，23:38 到岗即开工；prompt/manifest/context/close 四件套齐全）。
