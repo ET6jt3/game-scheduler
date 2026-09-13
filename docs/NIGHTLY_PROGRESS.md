@@ -38,10 +38,12 @@ Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a
 
 | M | 内容 | Verdict | Commit | 验收证据 |
 |---|------|---------|--------|----------|
+| M3 | 300s replay 协议面 soak（probes+skill+debug-dir+新 overlay 绘制路径,3fps）:900 周期走完,cache 868/900=96.4%,WS 18.1→18.0→19.4MB 平坦,句柄 129→128,60 张调试帧 268KB;**soak 抓出真 bug**:EVENT 轨迹显示 walk 卡 step_01,cycle 91=15s 超时×2 重试→failed,而 RESULT outcome=done 只是 duration 到期——e2e 弱断言(只看 outcome)让链式夹具上线以来一直假绿 | PASS(soak) / 发现缺陷 | (证据轮) | 协议流 5 行;资源三采样;stderr 同点守卫按设计告警 |
+| M4 | 学习草案质量修复(根因二处):①dominant_color 均值→**众数**(原均值把 67% 红块+33% 背景混成 (146,40,40),任何实际像素都不在容差内→探针永不触发);②anchor_between 锚点排除**消失侧**(只留当前段新内容块,以段0代表网格众数为背景估计;修前蓝段锚点 0.75×0.75 含红块残影→期望色≈背景→每帧误触发);双守护防复发:e2e 断言 RESULT state=done+EVENT 轨迹含 done,selftest 校验每探针「自己段帧能触发+上段帧不触发」 | PASS | 035c0e0 | 修后轨迹 step_01→step_02→step_03→done;step_02 探针 0.75×0.75→40×30 蓝块精确区;selftest+链式 e2e+LOCAL CI 全绿 |
 | M2 | NC9 验收 #3「可中断恢复」收官:learn_route **流式化**（一次解一帧,内存只留割点边界网格+当前帧——修复 README「常量内存」与全网格驻留的实现漂移,2h@1fps=7200 网格逼近 §5 预算的隐患消除）+ checkpoint/`--resume`（`--checkpoint-interval` 周期落盘,tmp+replace 原子写,成功即删;参数/帧目录漂移拒绝恢复）;**割点语义逐位保持**（先 round 后比较——原实现如此,先比较后 round 会在边界值翻转割点,复审时抓出） | PASS | 732f986 | selftest 新增:9 帧暂停→JSON 往返→resume 与一次性草案逐字节一致+守卫拒绝断言;CLI 级实测:第 6 帧中断→resume→哈希与 one-shot 一致;链式夹具 e2e RESULT done;LOCAL CI PASS |
 | M1 | NC3 overlay 联动收官:dry-run debug PNG 画出每个 L0 探针区域（触发=亮绿描边,未触发=暗灰描边）,文件名状态标签既有——调试翻帧现在同时可读「状态时间线」与「转移原因」;`stroke_rect` 循环钳制到帧内（**敌意复审真发现**:u32::MAX 尺寸的探针区域会让描边空转数十亿次,与 M20b drag-steps 同族 footgun;无界实现下新测试会直接挂死）+完全出画的边不画幽灵线;修复前后帧内像素完全一致 | PASS | 6472fe3 | 137 测试（+4:配色/裁剪/实评端到端/巨矩形有界+无幽灵）;clippy 0;链式夹具实机 --debug-dir 会话 RESULT done,pnglite 像素验证 1112 绿/137 灰描边,修复前后一致;LOCAL CI PASS |
 
-**known issues**: 无新增。**deferred**: ⑤NC9 视频 wrapper 待有 ffmpeg 的环境。**next**: M3 replay 模式协议面 soak（覆盖 M1 overlay 绘制路径:probes+skill+debug-dir 持续 300s,采样 WS/句柄/磁盘帧数）。
+**known issues**: 无新增。**deferred**: ⑤NC9 视频 wrapper 待有 ffmpeg 的环境。**known issues**: 无新增。**deferred**: NC9 视频 wrapper 待 ffmpeg 环境。**next**: Discovery Pass #3——EVENT→SSE defer 复核(今晚 soak 提供了新数据:900 周期仅 2 EVENT)、审计轮换或夜间安全面收尾。
 
 
 ### Night 2026-09-12 → 2026-09-13（夜班 agent 记录）
