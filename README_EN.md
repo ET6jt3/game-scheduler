@@ -154,7 +154,10 @@ AND a per-action SafetyGovernor pass.
   manifests only, never images.
 - **Dry-run loop**: window → capture → letterbox → detect (ONNX or
   mock) → inverse transform → governor verdict → debug PNG
-  (`--debug-dir`) → session TSV (`--session-log`).
+  (`--debug-dir`) → session TSV (`--session-log`). Debug PNGs also
+  visualize the NC3 linkage: the filename carries the skill state at
+  that cycle, and each L0 probe region is drawn on the frame (fired =
+  bright green border, idle = dim gray border).
 
 ```powershell
 cd controller

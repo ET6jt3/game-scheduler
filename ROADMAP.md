@@ -177,7 +177,7 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Objective**:Skill 是状态机,不是 `if sees button: click`。
 - **Scope**:`Skill / State / Evidence / Action / Expectation / Timeout / Retry / Fallback` 类型与执行引擎;每个状态必须定义:进入条件、感知证据、动作、期望结果、超时、重试、fallback、终止条件。示例:`Home → OpenMenu → MenuDetected → OpenDaily → DailyDetected → Claim → ConfirmSuccess → Done`。
 - **已落地(2026-09-09/10)**:`skill.rs` 数据驱动 SkillDefinition(严格 JSON 校验:状态名唯一/转移与 fallback 可解析/终态语义);Expectation 两形态(L0 探针触发 / 标签检测+置信度门);SkillRunner 纯转移评估器(Waiting/Transitioned/FellBack/Done/Failed,超时预算+有界重试);dry-run `--skill` 每周期以真实管线证据驱动并记录转移与计划动作(计划只记录——NC4 前无输入);`skill_pipeline` 集成测试 + 示例守护测试。
-- **Deliverables**:Skill 定义格式(数据驱动,JSON/TOML)+ 引擎 + 执行轨迹日志(与 dry-run overlay 联动)。(定义+引擎+轨迹日志 ✅;overlay 联动待打磨)
+- **Deliverables**:Skill 定义格式(数据驱动,JSON/TOML)+ 引擎 + 执行轨迹日志(与 dry-run overlay 联动)。(定义+引擎+轨迹日志 ✅;overlay 联动 ✅ 2026-09-13/14 夜:debug PNG 文件名带 skill 状态 + 帧内画出 L0 探针区域[触发=亮绿/未触发=暗灰描边],单测+链式夹具实机像素验证)
 - **Acceptance Criteria**:示例 Skill 在 dry-run 回放中每一步的 evidence/expectation 均可追溯;超时/重试/fallback 路径有测试。(超时/重试/fallback 测试 ✅;回放追溯待真实 Skill)
 - **Tests**:状态机引擎单测(用 MockDetector 编排固定帧序列)。(✅ 纯转移评估器 + 管线集成两层)
 - **Dependencies**:NC0–NC2。(NC1 运行时 🚧、NC2 地基 🚧 均已可支撑)

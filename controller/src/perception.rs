@@ -114,6 +114,13 @@ impl LayeredPerception {
         self.probes.iter().map(|p| p.name.clone()).collect()
     }
 
+    /// The registered L0 probes with full geometry, registration order —
+    /// the debug overlay draws these regions, which needs the rects and
+    /// not just the names.
+    pub fn probes(&self) -> &[PixelProbe] {
+        &self.probes
+    }
+
     /// Parse and validate an L0 probe set from JSON (the `--probes`
     /// config). Schema: `[{ "name", "x", "y", "w", "h", "expected":
     /// [b,g,r], "tolerance", "min_fraction", "step" }]`.

@@ -377,7 +377,7 @@ fn build_backend(
 
 fn run_dry_run(opts: &DryRunOptions) -> i32 {
     use controller::capture::FpsLimiter;
-    use controller::pipeline::{draw_overlay, run_cycle};
+    use controller::pipeline::{draw_overlay, draw_probe_regions, run_cycle};
     use controller::safety::{SafetyConfig, SafetyGovernor};
     use controller::vision::Detector as _;
     use controller::window::{ensure_dpi_awareness, GameWindow, OwnedTestWindow};
@@ -1035,6 +1035,11 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         if let (Some(dir), Some(mut frame)) = (&opts.debug_dir, report.frame.clone()) {
             if reportable {
                 draw_overlay(&mut frame, &report.client_detections, [0, 230, 255, 255]);
+                // NC3 traceability: probe regions show *why* the state
+                // machine moved (green = fired this cycle, gray = idle).
+                if let Some(lp) = perception.as_ref() {
+                    draw_probe_regions(&mut frame, lp.probes(), &report.evidence);
+                }
                 // NC3 traceability: the skill state rides in the filename so
                 // a flip through the debug dir reads as a state timeline
                 let state_tag = match skill_runner.as_ref() {

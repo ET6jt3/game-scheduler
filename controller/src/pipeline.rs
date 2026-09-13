@@ -42,6 +42,42 @@ pub fn letterbox_to_model(frame: &Frame, model_w: u32, model_h: u32) -> Result<F
     Ok(out)
 }
 
+/// Stroke the visible part of a rectangle border in the frame's own
+/// coordinate space. Loop ranges are clamped to the frame — a corrupt
+/// probe config with a huge region must not spin the draw for billions
+/// of iterations (same footgun family as the drag-step clamp) — and
+/// lines that fall entirely outside are NOT phantom-drawn at the frame
+/// edges: the overlay must only ever show borders that are really there.
+fn stroke_rect(frame: &mut Frame, x: u32, y: u32, w: u32, h: u32, color: [u8; 4]) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    let x1 = x.saturating_add(w).min(frame.width);
+    let y1 = y.saturating_add(h).min(frame.height);
+    if y < frame.height {
+        for px in x..x1 {
+            frame.set_pixel(px, y, color);
+        }
+    }
+    let bottom = y.saturating_add(h - 1);
+    if bottom < frame.height {
+        for px in x..x1 {
+            frame.set_pixel(px, bottom, color);
+        }
+    }
+    if x < frame.width {
+        for py in y..y1 {
+            frame.set_pixel(x, py, color);
+        }
+    }
+    let right = x.saturating_add(w - 1);
+    if right < frame.width {
+        for py in y..y1 {
+            frame.set_pixel(right, py, color);
+        }
+    }
+}
+
 /// Draw a detection's bounding box (in the frame's own coordinate space)
 /// in bright yellow with corner ticks; pixels near edges are clipped by
 /// `Frame::set_pixel`.
@@ -51,18 +87,36 @@ pub fn draw_overlay(frame: &mut Frame, detections: &[Detection], color: [u8; 4])
         let y0 = d.rect.y.max(0.0) as u32;
         let x1 = (d.rect.x + d.rect.w).min(frame.width as f32) as u32;
         let y1 = (d.rect.y + d.rect.h).min(frame.height as f32) as u32;
-        for x in x0..x1.min(frame.width) {
-            frame.set_pixel(x, y0, color);
-            if y1 > 0 {
-                frame.set_pixel(x, y1 - 1, color);
-            }
-        }
-        for y in y0..y1.min(frame.height) {
-            frame.set_pixel(x0, y, color);
-            if x1 > 0 {
-                frame.set_pixel(x1 - 1, y, color);
-            }
-        }
+        stroke_rect(
+            frame,
+            x0,
+            y0,
+            x1.saturating_sub(x0),
+            y1.saturating_sub(y0),
+            color,
+        );
+    }
+}
+
+/// Draw every L0 probe's region on the frame: bright green border when the
+/// probe fired this cycle, dim gray when it did not. This is the visual
+/// half of the NC3 traceability contract — flipping through the debug dir
+/// shows not only which state the skill was in (filename tag) but why
+/// (which probe region matched).
+pub fn draw_probe_regions(
+    frame: &mut Frame,
+    probes: &[crate::perception::PixelProbe],
+    evidence: &Evidence,
+) {
+    const FIRED: [u8; 4] = [0, 220, 0, 255];
+    const IDLE: [u8; 4] = [96, 96, 96, 255];
+    for p in probes {
+        let color = if evidence.probe_fired(&p.name) {
+            FIRED
+        } else {
+            IDLE
+        };
+        stroke_rect(frame, p.x, p.y, p.w, p.h, color);
     }
 }
 
@@ -401,5 +455,144 @@ mod tests {
             "lost foreground must stop: {report:?}"
         );
         assert!(report.action_verdict.is_none());
+    }
+
+    fn solid_frame(w: u32, h: u32, bgra: [u8; 4]) -> Frame {
+        let mut f = Frame::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                f.set_pixel(x, y, bgra);
+            }
+        }
+        f
+    }
+
+    fn make_probe(
+        name: &str,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        expected: [u8; 3],
+    ) -> crate::perception::PixelProbe {
+        crate::perception::PixelProbe {
+            name: name.into(),
+            x,
+            y,
+            w,
+            h,
+            expected,
+            tolerance: 8,
+            min_fraction: 0.5,
+            step: 1,
+        }
+    }
+
+    #[test]
+    fn probe_regions_show_fired_vs_idle() {
+        let mut frame = solid_frame(32, 24, [10, 20, 30, 255]);
+        let probes = vec![
+            make_probe("hot", 2, 2, 6, 4, [0, 0, 0]),
+            make_probe("cold", 14, 2, 6, 4, [0, 0, 0]),
+        ];
+        let evidence = crate::perception::Evidence {
+            probes: vec![
+                crate::perception::ProbeResult {
+                    name: "hot".into(),
+                    fired: true,
+                    matched_fraction: 1.0,
+                },
+                crate::perception::ProbeResult {
+                    name: "cold".into(),
+                    fired: false,
+                    matched_fraction: 0.0,
+                },
+            ],
+            matches: Vec::new(),
+        };
+        draw_probe_regions(&mut frame, &probes, &evidence);
+        // fired region: green border, untouched interior
+        assert_eq!(frame.pixel(2, 2), Some([0, 220, 0, 255]), "top-left border");
+        assert_eq!(
+            frame.pixel(7, 2),
+            Some([0, 220, 0, 255]),
+            "top-right border (x=2+6-1)"
+        );
+        assert_eq!(
+            frame.pixel(4, 4),
+            Some([10, 20, 30, 255]),
+            "interior must not be painted"
+        );
+        // idle region: dim gray border
+        assert_eq!(frame.pixel(14, 2), Some([96, 96, 96, 255]), "idle border");
+    }
+
+    #[test]
+    fn probe_regions_clip_out_of_bounds() {
+        let mut frame = solid_frame(32, 24, [10, 20, 30, 255]);
+        let probes = vec![
+            make_probe("corner", 28, 20, 10, 10, [0, 0, 0]),
+            make_probe("empty", 0, 0, 0, 0, [0, 0, 0]),
+        ];
+        let evidence = crate::perception::Evidence::default();
+        draw_probe_regions(&mut frame, &probes, &evidence);
+        assert_eq!(
+            frame.pixel(31, 20),
+            Some([96, 96, 96, 255]),
+            "clipped top row"
+        );
+        assert_eq!(
+            frame.pixel(28, 23),
+            Some([96, 96, 96, 255]),
+            "clipped left col"
+        );
+        assert_eq!(
+            frame.pixel(0, 0),
+            Some([10, 20, 30, 255]),
+            "zero-size draws nothing"
+        );
+    }
+
+    #[test]
+    fn probe_regions_huge_rect_is_bounded_and_no_phantom() {
+        // A corrupt config with u32::MAX-sized regions must not spin the
+        // draw for billions of iterations (an unbounded implementation
+        // hangs this test), and invisible border lines must not appear
+        // as phantoms at the frame edges.
+        let mut frame = solid_frame(16, 12, [10, 20, 30, 255]);
+        let probes = vec![make_probe("huge", 4, 6, u32::MAX, u32::MAX, [0, 0, 0])];
+        draw_probe_regions(&mut frame, &probes, &crate::perception::Evidence::default());
+        // visible part: top row y=6 (x 4..15) and left column x=4 (y 6..11)
+        assert_eq!(frame.pixel(4, 6), Some([96, 96, 96, 255]));
+        assert_eq!(frame.pixel(15, 6), Some([96, 96, 96, 255]));
+        assert_eq!(frame.pixel(4, 11), Some([96, 96, 96, 255]));
+        // off-frame lines draw nothing at the edges
+        assert_eq!(
+            frame.pixel(5, 11),
+            Some([10, 20, 30, 255]),
+            "no phantom bottom row"
+        );
+        assert_eq!(
+            frame.pixel(15, 7),
+            Some([10, 20, 30, 255]),
+            "no phantom right column"
+        );
+    }
+
+    #[test]
+    fn probe_regions_use_live_evaluation_evidence() {
+        // The overlay must reflect what evaluation ACTUALLY decided this
+        // cycle, not a hardcoded assumption: a probe whose region matches
+        // draws green, a mismatching one draws gray.
+        let mut frame = solid_frame(32, 24, [200, 40, 16, 255]);
+        let mut lp = crate::perception::LayeredPerception::new();
+        lp.add_probe(make_probe("hits", 0, 0, 8, 8, [200, 40, 16]));
+        lp.add_probe(make_probe("misses", 16, 12, 8, 8, [1, 2, 3]));
+        let evidence = lp.evaluate(&frame);
+        assert!(evidence.probe_fired("hits"));
+        assert!(!evidence.probe_fired("misses"));
+        draw_probe_regions(&mut frame, lp.probes(), &evidence);
+        assert_eq!(frame.pixel(0, 0), Some([0, 220, 0, 255]));
+        assert_eq!(frame.pixel(16, 12), Some([96, 96, 96, 255]));
     }
 }
