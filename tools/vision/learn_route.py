@@ -105,9 +105,19 @@ def block_diffs(gw: int, gh: int, a: bytes, b: bytes, blocks: int):
     return out
 
 
-def anchor_between(gw: int, gh: int, a: bytes, b: bytes, blocks: int) -> dict | None:
+def anchor_between(gw: int, gh: int, a: bytes, b: bytes, blocks: int, bg: int | None = None) -> dict | None:
     """Localize WHERE two segment representatives differ: bounding box of
-    the hot blocks, in NORMALIZED coordinates (0..1)."""
+    the hot blocks, in NORMALIZED coordinates (0..1).
+
+    With `bg` (the learned background luminance) the bbox keeps only blocks
+    where the CURRENT segment has new content — a scene change also makes
+    the PREVIOUS segment's content "hot" (it disappeared), and a bbox
+    spanning both yields degenerate probes: an expected color blended from
+    old+new+background that matches NO actual pixel, or a background color
+    that fires every frame. Found by the 2026-09-13/14 night soak: the
+    chained fixture's skill walked to failed, not done. Falls back to the
+    unrefined bbox when no new-content block survives (honest weak anchor).
+    """
     scores = block_diffs(gw, gh, a, b, blocks)
     if not scores:
         return None
@@ -115,6 +125,12 @@ def anchor_between(gw: int, gh: int, a: bytes, b: bytes, blocks: int) -> dict | 
     if peak <= 0:
         return None
     hot = [s for s in scores if s[0] >= peak * 0.5]
+    if bg is not None:
+        cur_means = block_diffs(gw, gh, b, bytes(gw * gh), blocks)
+        mean_by = {(s[1], s[2]): s[0] for s in cur_means}
+        refined = [s for s in hot if abs(mean_by[(s[1], s[2])] - bg) >= peak * 0.25]
+        if refined:
+            hot = refined
     x0 = min(s[1] for s in hot) / gw
     y0 = min(s[2] for s in hot) / gh
     x1 = max(s[3] for s in hot) / gw
@@ -128,8 +144,11 @@ def anchor_between(gw: int, gh: int, a: bytes, b: bytes, blocks: int) -> dict | 
 
 
 def dominant_color(frame_path: Path, anchor: dict) -> list[int] | None:
-    """Average RGB inside the anchor region of one frame (normalized coords
-    → pixels). Gives the probe layer a concrete color target for this step."""
+    """Modal RGB inside the anchor region of one frame (normalized coords
+    → pixels). MODE, not mean: an anchor that also covers background would
+    average to a blend that matches no actual pixel (a probe built on the
+    blend can never fire — same soak finding as anchor_between's doc).
+    The modal quantized color is the content the probe must watch."""
     try:
         w, h, ch, pix = pnglite.read_png(frame_path)
     except Exception:
@@ -141,19 +160,24 @@ def dominant_color(frame_path: Path, anchor: dict) -> list[int] | None:
     x1 = min(w, max(x0 + 1, int((anchor["x"] + anchor["w"]) * w)))
     y1 = min(h, max(y0 + 1, int((anchor["y"] + anchor["h"]) * h)))
     step = max(1, (x1 - x0) * (y1 - y0) // 4096)
-    rs = gs = bs = n = 0
+    buckets = {}
     for y in range(y0, y1):
         for x in range(x0, x1):
             if step > 1 and (x * 31 + y * 17) % step != 0:
                 continue
             o = (y * w + x) * ch
-            rs += pix[o]
-            gs += pix[o + 1]
-            bs += pix[o + 2]
-            n += 1
-    if n == 0:
+            key = (pix[o] >> 4, pix[o + 1] >> 4, pix[o + 2] >> 4)
+            b = buckets.setdefault(key, [0, 0, 0, 0])
+            b[0] += pix[o]
+            b[1] += pix[o + 1]
+            b[2] += pix[o + 2]
+            b[3] += 1
+    if not buckets:
         return None
-    return [rs // n, gs // n, bs // n]
+    best = max(buckets.values(), key=lambda v: v[3])
+    if best[3] == 0:
+        return None
+    return [best[0] // best[3], best[1] // best[3], best[2] // best[3]]
 
 
 def _grid_to_json(g) -> list | None:
@@ -283,6 +307,15 @@ def learn(frames_dir: Path, max_side: int = DEFAULT_MAX_SIDE,
     pair_stats = st["pair_stats"]
     bounds = [0] + cuts + [len(frames)]
 
+    # Background estimate: the modal luminance of segment 0's representative
+    # grid (the first segment is whatever "resting" looks like). Fed to
+    # anchor_between so ghosts of the PREVIOUS segment's content don't end
+    # up inside the anchor.
+    bg = None
+    if len(bounds) > 1 and bounds[1] - 1 in retained:
+        values = retained[bounds[1] - 1][-1]
+        bg = max(set(values), key=values.count)
+
     segments = []
     for si in range(len(bounds) - 1):
         start, end = bounds[si], bounds[si + 1]
@@ -294,7 +327,7 @@ def learn(frames_dir: Path, max_side: int = DEFAULT_MAX_SIDE,
         # route step. Segment 0 has no entry, so no anchor.
         if start > 0:
             prev_rep = retained[start - 1]
-            anchor = anchor_between(gw, gh, prev_rep[-1], rep[-1], DEFAULT_BLOCK) or {}
+            anchor = anchor_between(gw, gh, prev_rep[-1], rep[-1], DEFAULT_BLOCK, bg) or {}
             if anchor:
                 # The probe layer needs a concrete color to watch for: sample
                 # the CURRENT segment's look at that region (re-reads only
@@ -408,6 +441,52 @@ def selftest() -> int:
             except SystemExit:
                 pass
 
+        # probe-fire validation (the OTHER soak finding): a draft can look
+        # structurally perfect while its probes can never fire — a mean-blend
+        # expected color matches no actual pixel, and a ghost-spanning anchor
+        # yields a background color that fires everywhere. Each anchored
+        # segment's probe must fire on ITS OWN representative frame and NOT
+        # on the previous segment's (discriminative, not just active).
+        def probe_fires(path, probe):
+            w, h, ch, pix = pnglite.read_png(path)
+            hits = tot = 0
+            eb, eg, er = probe["expected"]  # BGRA; PNG files are RGBA
+            for y in range(probe["y"], min(probe["y"] + probe["h"], h), probe["step"]):
+                for x in range(probe["x"], min(probe["x"] + probe["w"], w), probe["step"]):
+                    o = (y * w + x) * ch
+                    tot += 1
+                    if (abs(pix[o] - er) <= probe["tolerance"]
+                            and abs(pix[o + 1] - eg) <= probe["tolerance"]
+                            and abs(pix[o + 2] - eb) <= probe["tolerance"]):
+                        hits += 1
+            return tot > 0 and hits / tot >= probe["min_fraction"]
+
+        for si, seg in enumerate(draft["segments"]):
+            anchor = seg.get("anchor") or {}
+            if not anchor or "dominant_rgb" not in anchor:
+                continue
+            r, g, b = anchor["dominant_rgb"]  # probe expectation is BGRA
+            probe = {
+                "x": round(anchor["x"] * w), "y": round(anchor["y"] * h),
+                "w": round(anchor["w"] * w), "h": round(anchor["h"] * h),
+                "expected": [b, g, r],
+                "tolerance": 24,
+                "min_fraction": 0.4,
+                "step": 2,
+            }
+            own = d / f"frame_{seg['end_frame']:05d}.png"
+            if not probe_fires(own, probe):
+                print(f"selftest FAIL: segment {si} probe never fires on its own "
+                      f"frame {own.name} (expected {probe['expected']})")
+                ok = False
+            if si > 0:
+                prev = draft["segments"][si - 1]
+                prev_path = d / f"frame_{prev['end_frame']:05d}.png"
+                if probe_fires(prev_path, probe):
+                    print(f"selftest FAIL: segment {si} probe also fires on the "
+                          f"previous segment's frame {prev_path.name} (not discriminative)")
+                    ok = False
+
         same = d / "same"
         same.mkdir()
         for i in range(10):
@@ -429,7 +508,7 @@ def selftest() -> int:
 
         if ok:
             print("learn_route selftest: PASS (2-segment split at 8, anchor ~(0.7,0.7), static no-split, "
-                  "resume==one-shot draft, checkpoint guards, PNG round-trip)")
+                  "resume==one-shot draft, checkpoint guards, probe fires own/not-prev, PNG round-trip)")
             return 0
         return 1
 

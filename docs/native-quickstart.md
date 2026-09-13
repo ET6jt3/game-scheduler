@@ -43,6 +43,8 @@ python learn_route.py C:\temp\frames --inspect
 # 产物: C:\temp\frames\route-draft.json
 #  - 场景切分(全局均值 + 峰值块双阈值,抓得住弹窗/菜单这类局部变化)
 #  - 每段进入时变化区域的【归一化锚点】+ 主色
+# 长录像(约每 100 帧自动落一个可恢复检查点)中途被打断?用 --resume 接着算,
+# 最终草案与一次跑完逐字节一致;成功后检查点自动删除。
 python draft_to_skill.py C:\temp\frames\route-draft.json --out-dir C:\temp\skill
 # 产物: C:\temp\skill\probes.json + skill.json(NC3 SkillDefinition 契约)
 ```

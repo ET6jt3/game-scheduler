@@ -15,7 +15,7 @@ the committed fixture definition; no binary blobs in git).
 
 Without --controller the chain stops after conversion and validates the
 emitted probes/skill pair structurally. With --controller the controller
-replays the frames and the last RESULT line must be outcome=done:
+replays the frames and the RESULT must be outcome=done with the skill walk GENUINELY reaching state=done (final state + EVENT trajectory asserted — duration expiry alone reports done even for a stuck walk):
 
     python pipeline_e2e.py --controller ..\\..\\controller\\target\\debug\\controller.exe
 """
@@ -135,17 +135,33 @@ def main() -> int:
              "--probes", str(out / "probes.json"),
              "--skill", str(out / "skill.json")],
             capture_output=True, text=True)
-        result = ""
+        result = {}
+        event_states = []
         for line in proc.stdout.splitlines():
-            if '"RESULT"' in line:
-                result = line
-        if proc.returncode != 0 or '"outcome":"done"' not in result.replace(" ", ""):
-            sys.stderr.write(f"pipeline_e2e: replay did not reach done "
-                             f"(exit {proc.returncode})\nlast RESULT: {result or 'none'}\n")
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("type") == "EVENT":
+                event_states.append(rec.get("payload", {}).get("state"))
+            elif rec.get("type") == "RESULT":
+                result = rec.get("payload", {})
+        # outcome=done alone is NOT enough: duration expiry also reports
+        # done even when the skill walk is STUCK (the soak-caught failure:
+        # state stayed step_01 and the e2e stayed green for a night). The
+        # walk must genuinely REACH done: the final state is done and the
+        # EVENT trajectory shows the transition.
+        if (proc.returncode != 0 or result.get("outcome") != "done"
+                or result.get("state") != "done" or "done" not in event_states):
+            sys.stderr.write(
+                "pipeline_e2e: replay did not genuinely reach done "
+                f"(exit {proc.returncode}, outcome={result.get('outcome')!r}, "
+                f"final state={result.get('state')!r}, event states={event_states})\n")
             sys.stderr.write(proc.stdout[-2000:])
             sys.stderr.write(proc.stderr[-2000:])
             return 1
-        print("[4/4] controller replay: RESULT done")
+        print(f"[4/4] controller replay: RESULT done, walk reached state=done "
+              f"(trajectory: {' -> '.join(event_states)})")
         print("NC9 PIPELINE E2E PASS")
         return 0
     finally:
