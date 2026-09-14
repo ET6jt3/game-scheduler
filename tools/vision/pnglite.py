@@ -113,7 +113,13 @@ def read_png(path):
     if not idat:
         raise PngError("no IDAT data")
 
-    raw = zlib.decompress(bytes(idat))
+    try:
+        raw = zlib.decompress(bytes(idat))
+    except zlib.error as e:
+        # a killed capture leaves a truncated frame; bare zlib.error would
+        # escape PngError-typed handling and name no file — wrap it
+        raise PngError(f"corrupt IDAT ({e}) — file truncated or damaged")
+
     stride = width * channels
     expected = (stride + 1) * height
     if len(raw) != expected:

@@ -58,6 +58,9 @@ tools/vision/
   无 GPU、无模型下载。处理状态是纯 JSON：`--checkpoint-interval N`（默认
   100）周期落盘可恢复检查点，中断后 `--resume` 继续，最终草案与一次性运行
   **逐字节一致**（selftest 断言；NC9 验收「批处理可中断、可恢复」）。
+  损坏输入点名拒绝：被杀录像留下的截断帧、被杀运行留下的残缺 checkpoint，
+  都会报出具体帧名/缺失字段（不再裸 traceback），已完成帧保留在
+  checkpoint 里可续跑。
   `python learn_route.py --selftest` 是合成端到端守护（nightly-verify 已接入）。
 - 链式夹具 e2e：`python pipeline_e2e.py --controller <controller.exe>`
   在临时目录生成**确定性** 4 场景合成录像（16 帧，无随机无时间戳），

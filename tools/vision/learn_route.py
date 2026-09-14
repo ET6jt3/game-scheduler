@@ -188,6 +188,13 @@ def _grid_from_json(j):
     return None if j is None else (j[0], j[1], base64.b64decode(j[2]))
 
 
+# A checkpoint is the resume contract for multi-hour captures; a file
+# truncated by a killed run (or hand-edited) must be refused by NAME, not
+# blow up with a KeyError after the operator has already restarted.
+_CHECKPOINT_FIELDS = ("version", "params", "frame_count", "first_frame",
+                      "next_index", "pair_stats", "cuts", "retained", "last_grid")
+
+
 def checkpoint_dumps(st: dict) -> str:
     """Serialize a learn() processing state to JSON (grids b64-encoded)."""
     out = dict(st)
@@ -198,9 +205,24 @@ def checkpoint_dumps(st: dict) -> str:
 
 def checkpoint_loads(s: str) -> dict:
     """The inverse of checkpoint_dumps — grids decode back to bytes."""
-    st = json.loads(s)
-    st["retained"] = {k: _grid_from_json(g) for k, g in st["retained"].items()}
-    st["last_grid"] = _grid_from_json(st["last_grid"])
+    try:
+        st = json.loads(s)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"learn_route: checkpoint is not valid JSON ({e}) — "
+                         "the file was likely truncated by a killed run; "
+                         "delete it to restart or restore a good copy")
+    if not isinstance(st, dict):
+        raise SystemExit("learn_route: checkpoint is not a JSON object")
+    missing = [k for k in _CHECKPOINT_FIELDS if k not in st]
+    if missing:
+        raise SystemExit(f"learn_route: checkpoint missing field(s) "
+                         f"{', '.join(missing)} — corrupt or foreign file")
+    try:
+        st["retained"] = {k: _grid_from_json(g) for k, g in st["retained"].items()}
+        st["last_grid"] = _grid_from_json(st["last_grid"])
+    except Exception as e:
+        raise SystemExit(f"learn_route: checkpoint grid data is undecodable ({e}) "
+                         "— corrupt file, delete it to restart")
     return st
 
 
@@ -265,7 +287,14 @@ def learn(frames_dir: Path, max_side: int = DEFAULT_MAX_SIDE,
     since_progress = 0
     while st["next_index"] < target:
         k = st["next_index"]
-        w, h, ch, pix = pnglite.read_png(frames[k])
+        try:
+            w, h, ch, pix = pnglite.read_png(frames[k])
+        except (OSError, ValueError) as e:
+            # PngError subclasses ValueError; a killed capture leaves a
+            # truncated last frame — name it instead of a bare traceback
+            raise SystemExit(f"learn_route: frame {frames[k].name} is unreadable "
+                             f"({e}) — remove or re-capture it and re-run "
+                             "(completed frames are kept in the checkpoint)")
         g = downsample_gray(w, h, ch, pix, st["params"]["max_side"])
         if grid_size is None:
             grid_size = [g[0], g[1]]
@@ -441,6 +470,44 @@ def selftest() -> int:
             except SystemExit:
                 pass
 
+        # corrupt-input refusals: a killed capture leaves a truncated last
+        # frame, a killed run can truncate the checkpoint — both must be
+        # refused with the culprit NAMED, never a bare traceback
+        corrupt = d / "corrupt"
+        corrupt.mkdir()
+        pnglite.write_png(corrupt / "frame_00000.png", w, h, frame(w, h, False))
+        pnglite.write_png(corrupt / "frame_00001.png", w, h, frame(w, h, False))
+        blob = (corrupt / "frame_00001.png").read_bytes()
+        (corrupt / "frame_00001.png").write_bytes(blob[: len(blob) // 2])  # mid-IDAT
+        try:
+            learn(corrupt, max_side=DEFAULT_MAX_SIDE, threshold=DEFAULT_THRESHOLD,
+                  block_threshold=DEFAULT_BLOCK_THRESHOLD)
+            print("selftest FAIL: truncated frame must be refused")
+            ok = False
+        except SystemExit as e:
+            if "frame_00001.png" not in str(e):
+                print(f"selftest FAIL: truncated-frame error must name the file, got: {e}")
+                ok = False
+        (corrupt / "frame_00001.png").write_bytes(blob)  # restore: reach frame_00002
+        (corrupt / "frame_00002.png").write_bytes(b"definitely not a png")
+        try:
+            learn(corrupt, max_side=DEFAULT_MAX_SIDE, threshold=DEFAULT_THRESHOLD,
+                  block_threshold=DEFAULT_BLOCK_THRESHOLD)
+            print("selftest FAIL: non-PNG frame must be refused")
+            ok = False
+        except SystemExit as e:
+            if "frame_00002.png" not in str(e):
+                print(f"selftest FAIL: non-PNG error must name the file, got: {e}")
+                ok = False
+        for bad_ckpt, why in (("not json at all {", "invalid-JSON"),
+                              (json.dumps({"version": 1}), "missing-fields")):
+            try:
+                checkpoint_loads(bad_ckpt)
+                print(f"selftest FAIL: {why} checkpoint must be refused")
+                ok = False
+            except SystemExit:
+                pass
+
         # probe-fire validation (the OTHER soak finding): a draft can look
         # structurally perfect while its probes can never fire — a mean-blend
         # expected color matches no actual pixel, and a ghost-spanning anchor
@@ -508,7 +575,8 @@ def selftest() -> int:
 
         if ok:
             print("learn_route selftest: PASS (2-segment split at 8, anchor ~(0.7,0.7), static no-split, "
-                  "resume==one-shot draft, checkpoint guards, probe fires own/not-prev, PNG round-trip)")
+                  "resume==one-shot draft, checkpoint guards, corrupt frame/checkpoint named-refusal, "
+                  "probe fires own/not-prev, PNG round-trip)")
             return 0
         return 1
 
