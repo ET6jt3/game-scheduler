@@ -67,7 +67,7 @@ Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/co
 
 | M10 | **`--on-terminal stop`(NC6 失败快速反馈)**:soak 过程发现——skill 终态失败(超时+重试语义按设计在 cycle~124 FAILED)后会话仍空转至时长/governor 预算耗尽,调度侧 Execution 卡 running 半小时才拿到 RESULT failed。新增 controller 旗标 `--on-terminal <continue\|stop>`(默认 continue=既有全部 soak/测试钉死的观察语义;stop=失败 EVENT 后立即结束,同一 RESULT 映射与 exit 0;governor/安全停止优先级不变;done 不受影响);Go native params 增 `on_terminal`(continue\|stop,校验+透传);协议集成测试 ×2 双向钉死(旗标下 30s 预算 <25s 实际 ~2s 结束;无旗标跑满 duration);文档四处同步(协议草案/quickstart/README 中英);顺手补上 ci-local 引用却不存在的 docs/MR_ENVIRONMENT.md | PASS | 9fba97a | cargo test 5/5(含 2 新协议测试);NIGHTLY VERIFY PASS;lib 133 绿;clippy 0 |
 
-**M6 协议 soak 断言(02:15,提前收车让位 M10 验收管线)**:replay 版(320×240 探针对齐)24 分钟 4399 周期——walk 16 周期真到 done,此后 **4387 连续 done 周期 done EVENT 恰好 1 次**(D1 终态门控最强单轮证据),协议流 HELLO/READY/EVENT×4(+RESULT 因主动终止缺席),same-point guard 4395 次零失控点击;资源未采样(TSV 周期时长 0.9-2.4ms 平稳)。
+**M6 协议 soak 断言(两轮,02:15 与 02:45)**:第一轮 replay 版 24 分钟 4399 周期(主动收车让位验收管线):walk 16 周期真到 done,此后 4387 连续 done 周期 done EVENT 恰好 1 次,same-point guard 4395 次零失控点击。第二轮 4h 尝试在 30 分钟处被 **governor max_session 上限干净终止**(RESULT outcome=stopped,安全设计真实生效——单会话 >30min 本就不可能,历史 M8 亦同):5376 周期,cache_hits=5204,state=done,EVENT 仍恰好 4 条,done 停留 5363 周期。**两轮合计 9775 周期,D1 终态门控证据充分**;长程证据由调度链 soak 承担(Go 侧无 governor 会话上限)。运维教训:后台长任务包装层会被会话回收(exit -1),但子进程存活——soak 证据管线不受影响;唤醒机制改用定时自动化。
 
 ### Night 2026-09-13 → 2026-09-14（夜班 agent 记录）
 
