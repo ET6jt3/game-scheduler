@@ -49,6 +49,8 @@ Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/co
 
 | M4 | **learn_route 摄入鲁棒性**（面向「长采集被中断」这一设计内场景）:pnglite 的 zlib.decompress 失败(截断 IDAT)从裸 `zlib.error` 包进 `PngError`;`learn()` 不可读帧 → SystemExit **点名帧文件**+已完成帧保留在 checkpoint 提示;`checkpoint_loads()` 对非法 JSON/非对象/缺字段/网格数据损坏全部**点名拒绝**(原先分别是 JSONDecodeError/KeyError 裸 traceback);selftest 扩展 4 个拒绝用例(截断帧/非 PNG 帧须点名文件,非法 JSON/缺字段 checkpoint 须拒绝) | PASS | 27cf025 | 四工具 selftest+链式 e2e 全绿;NIGHTLY VERIFY PASS |
 
+| M5 | **staticcheck 接入 ci-local 门禁**:全仓 defaults(SA/S/ST/U)扫描**零发现**(exit 0),作为常驻门禁接入(与 govulncheck/gosec 同模式:GOPATH\bin 解析,缺失诚实 SKIP——CI 节点无该工具时 Go-only 验收不受阻);quickstart 故障排查表补 M4 两条新报错的操作者条目 | PASS | 45c1278 | LOCAL CI PASS 含 staticcheck 段 |
+
 ### Night 2026-09-13 → 2026-09-14（夜班 agent 记录）
 
 Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a111fb1=本地 HEAD,dispatch_at=23:35,window 23:00-09:00;prompt GB18030 混编码含 1 字节截断,清洗后完整执行）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0,含 govulncheck/gosec/secret 扫描全绿）。
