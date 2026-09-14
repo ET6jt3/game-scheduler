@@ -113,6 +113,20 @@ else {
     Write-Host "SKIP gosec: not found in GOPATH\bin (go install github.com/securego/gosec/v2/cmd/gosec@latest)."
 }
 
+# staticcheck (honnef.co) catches what go vet misses — nil-deref paths,
+# impossible type assertions, lost cancels, unused code. Defaults only
+# (SA/S/ST/U); the codebase is clean under them as of 2026-09-15. Resolved
+# in GOPATH\bin like the other scanners; absent → skip honestly.
+$staticcheck = Join-Path (Join-Path $gopath "bin") "staticcheck.exe"
+if (Test-Path $staticcheck) {
+    Write-Host "== staticcheck =="
+    & $staticcheck ./...
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+else {
+    Write-Host "SKIP staticcheck: not found in GOPATH\bin (go install honnef.co/go/tools/cmd/staticcheck@latest)."
+}
+
 Write-Host "== secret scan =="
 # High-signal credential shapes only. The sole allowlisted value is the
 # synthetic token inside scripts/nightly-verify.ps1 (throwaway local test
