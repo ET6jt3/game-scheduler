@@ -274,3 +274,152 @@ fn failed_skill_event_emits_once() {
     );
     assert_eq!(events, 1, "the failed skill emits no other state changes");
 }
+
+/// `--on-terminal stop`: a skill that fails terminally should end the session
+/// PROMPTLY instead of cycling until the duration budget runs out — the
+/// scheduler's Execution row stays "running" until RESULT, so every wasted
+/// minute delays retries, failure notify and feedback stats. Fixture: a
+/// doomed skill (300ms timeout, no retries) inside a 30s session; with the
+/// flag the session must end in a small fraction of that budget.
+#[test]
+fn on_terminal_stop_ends_the_failed_session_early() {
+    use std::io::Read;
+    use std::time::Instant;
+    if !controller::window::interactive_desktop_available() {
+        eprintln!("skipped: no interactive desktop (service context)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("nf_proto_stop_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let skill = dir.join("skill.json");
+    std::fs::write(
+        &skill,
+        r#"{"name":"doomed","start":"s0","states":[
+            {"name":"s0","expect":[{"label":"never_detected"}],"actions":[],"next":"done","timeout_ms":300,"max_retries":0,"terminal":false},
+            {"name":"done","expect":[],"actions":[],"next":"done","timeout_ms":1000,"max_retries":1,"terminal":true}]}"#,
+    )
+    .expect("write skill");
+
+    let exe = env!("CARGO_BIN_EXE_controller");
+    let started = Instant::now();
+    let mut child = Command::new(exe)
+        .args([
+            "--dry-run",
+            "--protocol",
+            "--window",
+            "@probe",
+            "--backend",
+            "synthetic",
+            "--skill",
+        ])
+        .arg(skill.to_string_lossy().as_ref())
+        .args(["--duration", "30", "--on-terminal", "stop"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn controller");
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .expect("stdout")
+        .read_to_string(&mut stdout)
+        .expect("read");
+    let status = child.wait().expect("wait");
+    let elapsed = started.elapsed();
+    assert!(status.success(), "controller exited {status:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        elapsed.as_secs() < 25,
+        "the failed walk must end the session well before the 30s budget, took {elapsed:?}"
+    );
+    let mut failed_events = 0;
+    let mut outcome = None;
+    for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
+        let msg = controller::protocol::Envelope::parse(line)
+            .unwrap_or_else(|e| panic!("protocol violation: {e} — {line}"));
+        match msg.payload {
+            controller::protocol::Payload::Event(e) => {
+                if e.state == "failed" {
+                    failed_events += 1;
+                }
+            }
+            controller::protocol::Payload::Result(r) => outcome = Some(r),
+            _ => {}
+        }
+    }
+    let r = outcome.expect("RESULT line");
+    assert_eq!(r.outcome, controller::protocol::Outcome::Failed);
+    assert_eq!(failed_events, 1, "terminal failed EVENT stays exactly-once");
+}
+
+/// Default (no --on-terminal) must stay observe-to-duration: the failed walk
+/// keeps cycling until the requested duration, then RESULT failed. This pins
+/// the semantics every existing soak ran under, so the new flag can never
+/// silently change the default.
+#[test]
+fn default_continues_after_failure_until_duration() {
+    use std::io::Read;
+    use std::time::Instant;
+    if !controller::window::interactive_desktop_available() {
+        eprintln!("skipped: no interactive desktop (service context)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("nf_proto_cont_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let skill = dir.join("skill.json");
+    std::fs::write(
+        &skill,
+        r#"{"name":"doomed","start":"s0","states":[
+            {"name":"s0","expect":[{"label":"never_detected"}],"actions":[],"next":"done","timeout_ms":300,"max_retries":0,"terminal":false},
+            {"name":"done","expect":[],"actions":[],"next":"done","timeout_ms":1000,"max_retries":1,"terminal":true}]}"#,
+    )
+    .expect("write skill");
+
+    let exe = env!("CARGO_BIN_EXE_controller");
+    let started = Instant::now();
+    let mut child = Command::new(exe)
+        .args([
+            "--dry-run",
+            "--protocol",
+            "--window",
+            "@probe",
+            "--backend",
+            "synthetic",
+            "--skill",
+        ])
+        .arg(skill.to_string_lossy().as_ref())
+        .arg("--duration")
+        .arg("2")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn controller");
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .expect("stdout")
+        .read_to_string(&mut stdout)
+        .expect("read");
+    let status = child.wait().expect("wait");
+    let elapsed = started.elapsed();
+    assert!(status.success(), "controller exited {status:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        elapsed.as_secs_f32() >= 1.9,
+        "without the flag the session must run to its duration, ended after {elapsed:?}"
+    );
+    let mut outcome = None;
+    for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
+        let msg = controller::protocol::Envelope::parse(line)
+            .unwrap_or_else(|e| panic!("protocol violation: {e} — {line}"));
+        if let controller::protocol::Payload::Result(r) = msg.payload {
+            outcome = Some(r);
+        }
+    }
+    let r = outcome.expect("RESULT line");
+    assert_eq!(r.outcome, controller::protocol::Outcome::Failed);
+}

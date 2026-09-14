@@ -172,6 +172,12 @@ struct DryRunOptions {
     /// NC1 deferred item: which provider inference runs on (cpu|gpu).
     /// cpu is the default and the only soak-covered path.
     device: String,
+    /// NC6 semantics: when the skill walk terminally FAILS, "stop" ends the
+    /// session right away instead of cycling until the duration/governor
+    /// budget runs out — the scheduler learns of the failure in seconds, not
+    /// half an hour. Default "continue" keeps the observe-to-duration
+    /// behavior every soak and test pins today.
+    on_terminal_stop: bool,
     /// Roadmap deferred item (inference timeout): bound each inference
     /// wait. The WinML call itself is unkillable, so a timeout surfaces
     /// via take_error() and feeds the consecutive-failure breaker.
@@ -289,9 +295,15 @@ impl DryRunOptions {
                 .unwrap_or(5000),
             protocol: args.iter().any(|a| a == "--protocol"),
             device: opt(args, "--device").unwrap_or_else(|| "cpu".into()),
+            on_terminal_stop: opt(args, "--on-terminal").as_deref() == Some("stop"),
         };
         if !matches!(opts.device.as_str(), "cpu" | "gpu") {
             return Err(format!("--device must be cpu|gpu, got {:?}", opts.device));
+        }
+        if let Some(v) = opt(args, "--on-terminal") {
+            if !matches!(v.as_str(), "continue" | "stop") {
+                return Err(format!("--on-terminal must be continue|stop, got {v:?}"));
+            }
         }
         if opts.infer_timeout_ms == 0 || opts.infer_timeout_ms > 300_000 {
             return Err(format!(
@@ -657,6 +669,7 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
         .map(controller::session::SessionLogger::new);
 
     let mut cycle: u32 = 0;
+    let mut terminal_stop = false;
     let mut allowed_count: u32 = 0;
     let mut verdict_notes: Vec<String> = Vec::new();
     let mut outcome = "completed";
@@ -909,8 +922,18 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                         skill_terminal_emitted = true;
                         skill_failed_state = Some(runner.current().to_string());
                     }
+                    if opts.on_terminal_stop {
+                        terminal_stop = true;
+                    }
                 }
             }
+        }
+
+        if terminal_stop {
+            eprintln!(
+                "dry-run: skill failed terminally - ending the session early (--on-terminal stop)"
+            );
+            break;
         }
 
         // NC4: execute authorized plans when the operator opted in.

@@ -253,6 +253,10 @@ params declare `"executor":"native"` runs over the NC6 session protocol
   "probes": "skills/probes.json",
   "window": "@probe",
   "backend": "auto",
+  "on_terminal": "stop",           // optional: continue (default) | stop - end the
+                                   // session as soon as the skill fails terminally
+                                   // instead of holding the Execution row until the
+                                   // duration budget runs out; omit to observe on
   "dry_run": true,
   "duration_sec": 30
 }

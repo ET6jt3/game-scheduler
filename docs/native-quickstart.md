@@ -135,7 +135,7 @@ auto 只降级不升级:它永远不会替你打开真实输入,双闸照旧。
 | `config native_controller_path is not set` | config 没配 controller 路径 |
 | `no interactive desktop` / unsupported | 服务会话/Session 0 无法发输入与建窗,诚实跳过 |
 | `protocol json error` | stdout 混入了非协议行——controller 必须 `--protocol` 且人读输出走 stderr |
-| skill 一直 Waiting 后 failed | 期望(探针/标签)在录像里不成立:核对锚点坐标与主色容差 |
+| skill 一直 Waiting 后 failed | 期望(探针/标签)在录像里不成立:核对锚点坐标与主色容差。原生会话默认观察到时长结束才发 RESULT failed;调度任务想让失败秒级返回,在任务 params 加 `"on_terminal":"stop"` |
 | RESULT stopped(reason=session exceeded) | governor 会话时长到达,属正常业务终态 |
 | `learn_route: frame frame_NNNNN.png is unreadable` | 该帧损坏(多为被打断的录像留下的截断尾帧):删除或重捕该帧后 `--resume`——已完成帧保留在 checkpoint 里 |
 | `learn_route: checkpoint ... not valid JSON / missing field(s)` | checkpoint 残缺(运行被杀或文件被改动):删除该 checkpoint 重跑,或恢复好的副本 |

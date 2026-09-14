@@ -90,6 +90,11 @@ Go                                  controller
     侧的失败重试/失败通知/失败截图/反馈统计全部以 Execution 状态为准,
     不得把没做成的事记成 success。governor 停止(input-blocked/stopped)
     仍优先——安全信号更紧急,skill 失败仍可从 EVENT 轨迹与 TSV 追溯。
+  - **`--on-terminal stop`(2026-09-14/15 夜,默认 continue)**:失败后
+    会话默认仍观察到时长结束(既有 soak/测试钉死的语义);置 `stop` 则
+    在失败 EVENT 后立即结束会话并发出 RESULT failed——调度侧几秒内拿到
+    失败,而不是等满 governor 会话预算。done 不受影响(观察价值保留);
+    governor/安全停止优先级不变。
 
 ## 评审决策(2026-09-10/11,原"开放问题"定稿)
 

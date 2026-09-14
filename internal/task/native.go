@@ -50,6 +50,7 @@ type nativeParams struct {
 	Backend     string  `json:"backend"`
 	Model       string  `json:"model"`
 	Device      string  `json:"device"` // cpu|gpu; cpu default (soak-covered)
+	OnTerminal  string  `json:"on_terminal"`
 	DryRun      *bool   `json:"dry_run"`
 	AllowInput  bool    `json:"allow_input"`
 	DurationSec float64 `json:"duration_sec"`
@@ -128,6 +129,16 @@ func buildNativeSession(cfg config.Config, execID int64, t store.Task, p nativeP
 		args = append(args, "--device", "gpu")
 	default:
 		return native.SessionConfig{}, fmt.Errorf("native params device must be cpu|gpu, got %q", p.Device)
+	}
+	// on_terminal: "" = controller default (continue observing to duration);
+	// "stop" ends the session promptly when the skill fails terminally, so
+	// the Execution row stops sitting in running for the whole session budget.
+	switch p.OnTerminal {
+	case "":
+	case "continue", "stop":
+		args = append(args, "--on-terminal", p.OnTerminal)
+	default:
+		return native.SessionConfig{}, fmt.Errorf("native params on_terminal must be continue|stop, got %q", p.OnTerminal)
 	}
 	if p.DurationSec > 0 {
 		args = append(args, "--duration", fmt.Sprintf("%.1f", p.DurationSec))

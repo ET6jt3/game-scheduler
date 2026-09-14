@@ -575,6 +575,8 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
   "probes": "skills/probes.json",    // 可选,L0 探针定义
   "window": "@probe",                // 窗口标题子串;@probe=自带探针窗口
   "backend": "auto",                 // auto|wgc|gdi|synthetic
+  "on_terminal": "stop",             // 可选:continue(默认)|stop——skill 终态失败后立即结束会话,
+                                     // Execution 不必等满时长预算才拿到 failed;省略=观察到时长结束
   "dry_run": true,                   // 默认 true:只观察+记录计划动作
   "duration_sec": 30
 }

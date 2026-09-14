@@ -378,6 +378,33 @@ func TestBuildNativeSessionDefaultsAndFlags(t *testing.T) {
 	}
 }
 
+func TestBuildNativeSessionOnTerminal(t *testing.T) {
+	cfg := config.Config{NativeControllerPath: `C:\x\controller.exe`}
+	// default: the flag stays absent (controller keeps observe-to-duration)
+	p := paramsFor(t, `{"executor":"native"}`)
+	s, err := buildNativeSession(cfg, 1, store.Task{}, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(s.Args, " "), "--on-terminal") {
+		t.Fatalf("default must omit --on-terminal: %v", s.Args)
+	}
+	// stop: carried through verbatim
+	p = paramsFor(t, `{"executor":"native","on_terminal":"stop"}`)
+	s, err = buildNativeSession(cfg, 2, store.Task{}, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(s.Args, " "), "--on-terminal stop") {
+		t.Fatalf("on_terminal=stop must reach the controller args: %v", s.Args)
+	}
+	// any other value is a params contract error, not a silent pass-through
+	p = paramsFor(t, `{"executor":"native","on_terminal":"maybe"}`)
+	if _, err := buildNativeSession(cfg, 3, store.Task{}, p); err == nil {
+		t.Fatal("invalid on_terminal must be rejected")
+	}
+}
+
 func TestBuildNativeSessionAllowInputNeedsBothGates(t *testing.T) {
 	cfg := config.Config{NativeControllerPath: `C:\x\controller.exe`}
 	dry := false
