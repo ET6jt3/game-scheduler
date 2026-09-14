@@ -56,6 +56,10 @@ Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/co
 
 | M8 | **tools/vision 自测覆盖补完**:`train.py --selftest`(dry-plan 形状/确定性/缺数据守卫/--yes 门——有 ultralytics 时诚实跳过拒绝断言,自测试绝不真训)+`export_onnx.py --selftest`(dry-plan、6 项参数守卫、**manifest 契约逐字段钉死**——build_manifest 从 main 提取为纯函数,无 ultralytics 即可测;labels 顺序/input_size/confidence 区间/weights 文件名);两个新 selftest 接入 nightly-verify [5]。**tools/vision 六脚本现全部有 --selftest 且入电池** | PASS | 90de323 | NIGHTLY VERIFY PASS(含新段) |
 
+| M9 | **NC9 内存预算实测**(验收条款「内存 <300MB」从设计声明变实测):600 帧 640×480 合成序列(6 场景)learn 全程 WS 采样(0.5s 间隔,119 样本)→ **WS 峰值 21.1MB**(min 18.3MB),预算裕度 ~14×;6 段切分正确、锚点全 normalized、主色全提取。注:本夹具每场景全局改背景亮度→锚点按定义退化为全帧(变化覆盖一切)——锚点精度由稳定背景的链式 e2e 夹具覆盖,非学习缺陷 | PASS | (证据轮,无代码变更) | .nightly/m9-mem-draft.json |
+
+**M6 过程记录(诚实)**:长时协议 soak 首次配置有误——链式夹具 probes 按 320×240 帧烘焙,而 synthetic 窗口硬编码 640×480,像素探针错位→walk 卡 step_02;same-point guard 连续 ~4400 周期稳定兜住(每周期同一计划点击被 skip,零失控点击/零泄漏征兆)——意外获得守卫的长时可靠性数据点。终止后改用 `--replay`(320×240,探针对齐,循环)+duration 重发:walk 13 周期真到 done,此后 done 停留下 **done EVENT 恰好 1 次**(至 01:40 已 150+ done 周期),D1 终态门控长循环验证进行中,02:39 到期断言。残留工件:.nightly/soak-protocol-0915-stuckattempt.\*
+
 ### Night 2026-09-13 → 2026-09-14（夜班 agent 记录）
 
 Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a111fb1=本地 HEAD,dispatch_at=23:35,window 23:00-09:00;prompt GB18030 混编码含 1 字节截断,清洗后完整执行）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0,含 govulncheck/gosec/secret 扫描全绿）。
