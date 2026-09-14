@@ -23,6 +23,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Pin UTF-8 for native-command output capture: PS 5.1 otherwise decodes ctl's
+# UTF-8 stdout with the console codepage (GBK on zh-CN), silently mojibaking
+# every non-ASCII byte in API values — 'auto→native' became 'auto鈫抧ative'
+# and broke the auto-executor steps whenever the caller ran -NoProfile
+# (2026-09-14/15 night). Independent of the file BOM, which fixes the
+# script's OWN literals; this fixes the CAPTURED values.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
 $script:Step = 0
 $script:Failures = @()
 
@@ -185,6 +192,17 @@ try {
         # the execution rows cascade away with the task - nothing may be left
         $left = Invoke-Ctl -ResourceArgs @("execs") -Flags @("-task", "$($script:task.id)")
         if ($null -ne $left -and @($left).Count -gt 0) { throw "execution rows survived the cascade" }
+    }
+
+    # ---- 8b. ctl surface completion: dashboard totals + meta adapters ----
+    Step "dashboard totals + meta adapters (ctl surface)" {
+        $dash = Invoke-Ctl -ResourceArgs @("dashboard")
+        if ($null -eq $dash.totals -or $null -eq $dash.totals.executions_total) {
+            throw "dashboard totals.executions_total missing"
+        }
+        if ([long]$dash.totals.executions_total -lt 0) { throw "negative executions_total" }
+        $meta = Invoke-Ctl -ResourceArgs @("meta")
+        if (@($meta.adapters).Count -lt 1) { throw "meta.adapters empty" }
     }
 
     # ---- 9. native (NC6) full chain: real controller, zero input ----------

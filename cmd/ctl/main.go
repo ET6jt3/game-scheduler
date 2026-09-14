@@ -14,11 +14,12 @@
 //	materials list [-game id] [-category c] | get <id> | add | update <id> | delete <id>
 //	requirements list [-goal id] | get <id> | add | update <id> | delete <id>
 //	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | attach-route <id> -route <routeId>
-//	        | attach-skill <id> -skill <skill.json> | create-plan <id>
-//	planner recommend | recommendations [-goal id] [-game id] [-status s] | create-task <id> | create-plan <id>
-//	        | feedback <id> | export -game <id> | import -data '<json>'|@file.json|-
+//	        | attach-skill <id> -skill <skill.json> | create-plan <id> | feedback <id>
+//	        | dismiss <id> | complete <id> | delete <id> | export -game <id> | import -data '<json>'|@file.json|-
 //	plans   list | get <id> | add | update <id> | delete <id>
 //	execs   list [-task id] [-status s] [-limit n] | get <id> | cancel <id>
+//	dashboard                        totals + resource snapshot (/api/dashboard)
+//	meta                             available adapters (/api/meta)
 //	discover [-paths "F:/Games;D:/Tools"]   scan disk for tool executables
 //	guides   -q "<关键词>" [-game id]        search Bilibili guides + local routes
 //	health
@@ -120,6 +121,12 @@ func main() {
 	switch resource {
 	case "health":
 		err = c.do("GET", "/healthz", nil)
+	case "dashboard":
+		// totals live here, NOT in list endpoints (list views cap at 500
+		// rows — the soak-harness lesson from 2026-09-12/13)
+		err = c.do("GET", "/api/dashboard", nil)
+	case "meta":
+		err = c.do("GET", "/api/meta", nil)
 	case "guides":
 		if *query == "" {
 			err = fmt.Errorf("guides requires -q '<关键词>' (and optionally -game <id>)")

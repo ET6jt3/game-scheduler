@@ -18,6 +18,11 @@
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $repo
+# Pin UTF-8 console output for descendants: the windows-smoke child runs
+# -NoProfile and would otherwise inherit whatever codepage the CALLER's
+# launch style left behind (GBK when nightly-verify itself is started with
+# -NoProfile), mojibake-ing non-ASCII values captured from native commands.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
 
 $script:failed = @()
 
