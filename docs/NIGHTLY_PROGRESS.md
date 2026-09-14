@@ -50,6 +50,8 @@ Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a
 
 | M8 | controller 固定-walk 30min soak(3fps):walk 在 c1/c5/c9/c13 四个语义 EVENT 精确走至 done 并保持(D1 稀疏性再量化:5377 周期 4 EVENT=0.07%),5377 周期缓存 96.8%,governor max_session 30min 上限终止→outcome=stopped(**M5 优先级规则现场验证:安全停止压过一切**)、state=done | PASS | (证据轮) | 协议流 7 行;stderr 停止原因在案 |
 | M9 | `scripts/soak-scheduler.ps1` 入库:过夜 Go 侧调度链 soak 挂具(上夜 scratch 挂具教训制度化:隔离临时实例/随机端口/executions_total 口径/curl 直连/响亮报错);3min 冒烟 3 次触发精确命中零失败;随后启动 ~385min 过夜运行 | PASS(挂具) | (见下 commit) | 冒烟 exit 0:fires=3/3,failed=0,peak WS 17.3MB |
+
+| M10 | 过夜 Go 侧调度链 soak(385min,cron 每分钟):**385/385 fires 精确命中,failed_24h=0,running=0 全程,峰值 WS 22.1MB**(16.5→22.1 缓增 ~1MB/h,与保留行数增长相称);dashboard totals 口径逐分钟 386 行采样留档;挂具自带终验断言 exit 0 | PASS | (证据轮) | samples.csv + harness 终验 |
 | M2 | NC9 验收 #3「可中断恢复」收官:learn_route **流式化**（一次解一帧,内存只留割点边界网格+当前帧——修复 README「常量内存」与全网格驻留的实现漂移,2h@1fps=7200 网格逼近 §5 预算的隐患消除）+ checkpoint/`--resume`（`--checkpoint-interval` 周期落盘,tmp+replace 原子写,成功即删;参数/帧目录漂移拒绝恢复）;**割点语义逐位保持**（先 round 后比较——原实现如此,先比较后 round 会在边界值翻转割点,复审时抓出） | PASS | 732f986 | selftest 新增:9 帧暂停→JSON 往返→resume 与一次性草案逐字节一致+守卫拒绝断言;CLI 级实测:第 6 帧中断→resume→哈希与 one-shot 一致;链式夹具 e2e RESULT done;LOCAL CI PASS |
 | M1 | NC3 overlay 联动收官:dry-run debug PNG 画出每个 L0 探针区域（触发=亮绿描边,未触发=暗灰描边）,文件名状态标签既有——调试翻帧现在同时可读「状态时间线」与「转移原因」;`stroke_rect` 循环钳制到帧内（**敌意复审真发现**:u32::MAX 尺寸的探针区域会让描边空转数十亿次,与 M20b drag-steps 同族 footgun;无界实现下新测试会直接挂死）+完全出画的边不画幽灵线;修复前后帧内像素完全一致 | PASS | 6472fe3 | 137 测试（+4:配色/裁剪/实评端到端/巨矩形有界+无幽灵）;clippy 0;链式夹具实机 --debug-dir 会话 RESULT done,pnglite 像素验证 1112 绿/137 灰描边,修复前后一致;LOCAL CI PASS |
 
