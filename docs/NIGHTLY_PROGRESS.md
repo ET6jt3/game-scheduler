@@ -47,6 +47,8 @@ Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/co
 
 | M3 | **ps1 编码守卫进电池**:nightly-verify 新增 [5c]——扫描 scripts/examples/tools/cmd/internal 下含非 ASCII 但无 UTF-8 BOM 的 .ps1 即 FAIL 并点名(锁死 M2 的 bug 类别:5.1 按 ANSI 误读);守卫首轮自捕获 nightly-verify.ps1 自己(注释引用了 auto→native 箭头),按策略补 BOM;负向测试(合成无 BOM 探针文件)确认可抓 | PASS | ad65d0d | NIGHTLY VERIFY PASS(含新段);正/负双向实测 |
 
+| M4 | **learn_route 摄入鲁棒性**（面向「长采集被中断」这一设计内场景）:pnglite 的 zlib.decompress 失败(截断 IDAT)从裸 `zlib.error` 包进 `PngError`;`learn()` 不可读帧 → SystemExit **点名帧文件**+已完成帧保留在 checkpoint 提示;`checkpoint_loads()` 对非法 JSON/非对象/缺字段/网格数据损坏全部**点名拒绝**(原先分别是 JSONDecodeError/KeyError 裸 traceback);selftest 扩展 4 个拒绝用例(截断帧/非 PNG 帧须点名文件,非法 JSON/缺字段 checkpoint 须拒绝) | PASS | 27cf025 | 四工具 selftest+链式 e2e 全绿;NIGHTLY VERIFY PASS |
+
 ### Night 2026-09-13 → 2026-09-14（夜班 agent 记录）
 
 Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a111fb1=本地 HEAD,dispatch_at=23:35,window 23:00-09:00;prompt GB18030 混编码含 1 字节截断,清洗后完整执行）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0,含 govulncheck/gosec/secret 扫描全绿）。
