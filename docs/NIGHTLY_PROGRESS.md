@@ -51,6 +51,9 @@ Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/co
 
 | M5 | **staticcheck 接入 ci-local 门禁**:全仓 defaults(SA/S/ST/U)扫描**零发现**(exit 0),作为常驻门禁接入(与 govulncheck/gosec 同模式:GOPATH\bin 解析,缺失诚实 SKIP——CI 节点无该工具时 Go-only 验收不受阻);quickstart 故障排查表补 M4 两条新报错的操作者条目 | PASS | 45c1278 | LOCAL CI PASS 含 staticcheck 段 |
 
+| M6 | **长时合成协议 soak 起跑**(1h,dry-run,synthetic 后端+真实 ONNX fixture 64px+NC9 链式夹具 probes/skill,3fps,无窗口无输入,与调度链 soak 并行)——02:15 到期后断言(见收尾记录);首轮发起时 manifest 相对路径误降级 mock,杀掉重发(绝对路径,READY 回显 manifest 确认) | PASS(起跑) | (证据轮,终值见收尾) | soak-protocol-0915.tsv/.log |
+| M7 | **ctl 面补全 + 编码链最后一环**:`ctl dashboard`(/api/dashboard totals——了结「ctl 无 dashboard 资源」的挂具教训)+`ctl meta`(/api/meta adapter 清单);header 文档重复的 planner 行合并;**第二次编码翻转的根因闭合**:PS 5.1 按控制台代码页解码原生命令 stdout,调用链任一层 -NoProfile 即 GBK 乱码(profile 恰好钉 UTF-8 才让电池碰巧通过)——windows_smoke 与 nightly-verify 自钉 `[Console]::OutputEncoding=UTF8`,smoke 新增 [12] 步(dashboard totals+meta adapters 经新 ctl 资源) | PASS | 0424bc1 | targeted smoke **-NoProfile 最坏情况 18/18 OK**;LOCAL CI PASS |
+
 ### Night 2026-09-13 → 2026-09-14（夜班 agent 记录）
 
 Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a111fb1=本地 HEAD,dispatch_at=23:35,window 23:00-09:00;prompt GB18030 混编码含 1 字节截断,清洗后完整执行）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0,含 govulncheck/gosec/secret 扫描全绿）。
