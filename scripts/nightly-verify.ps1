@@ -101,6 +101,10 @@ python frames_to_dataset.py --selftest
 if ($LASTEXITCODE -ne 0) { $script:failed += "frames-to-dataset-selftest" }
 python prepare_dataset.py --selftest
 if ($LASTEXITCODE -ne 0) { $script:failed += "prepare-dataset-selftest" }
+python train.py --selftest
+if ($LASTEXITCODE -ne 0) { $script:failed += "train-selftest" }
+python export_onnx.py --selftest
+if ($LASTEXITCODE -ne 0) { $script:failed += "export-onnx-selftest" }
 
 # Chained fixture e2e: deterministic synthetic frames -> learn -> convert ->
 # controller dry-run replay must reach RESULT done (ROADMAP NC9 test item).

@@ -78,11 +78,16 @@ tools/vision/
    （走真实 CLI 子进程路径，nightly-verify 已接入）。
 2. **train.py**: 不带 `--yes` 只打印将要做的事（含将要下载的基模型）；
    带 `--yes` 且 ultralytics 可导入才真正训练。权重产物留在仓外。
+   `train.py --selftest` 守护 dry-plan 形状/确定性、缺数据守卫与 --yes 门
+   （有 ultralytics 时诚实跳过拒绝断言——自测试绝不真训）。
 3. **export_onnx.py**: `.pt → .onnx`（opset/imgsz 显式指定），并在导出
    旁边生成 **schema-v1 manifest**（labels / input_size / version /
    default_confidence / game_profile）——与 `controller/src/manifest.rs`
    的解析器逐字段对齐，可用
    `controller.exe --manifest-check <path>` 验证。
+   `export_onnx.py --selftest` 守护 dry-plan、全部参数守卫与 manifest
+   契约逐字段（无需 ultralytics）。tools/vision 六个脚本现全部有
+   `--selftest` 且接入 nightly-verify。
 
 ## 约定
 
