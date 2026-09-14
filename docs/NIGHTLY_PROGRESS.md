@@ -305,6 +305,28 @@ Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a
 
 - **M6b/soak2 收官（03:21–06:51,12600s 长程轮,M9 修正挂具）**:**PASS(直接测量)**——06:40:52 采样 `executions_total=1197`,同期期望 ~1198(Δ1 次,落点在下个 tick),全窗 `running=0`、`failed_24h=0`,最新 500 条 100% success,WS 20.9→23.9MB 全程平坦,CPU 累计 6.1s。挂具脚本自判 FAIL 系 scratch 工具第二处口径 bug——`ctl dashboard` 资源不存在(计数为空触发容差告警);权威读数取自直接 API 采样。**两条挂具教训入库账本**:①计数必须走 dashboard totals(executions_total)而非 list 窗口;②`ctl` 无 dashboard 资源,直连 `/api/dashboard`。
 
+### 夜班收尾（2026-09-14 08:40 close）
+
+- **Session**:START_COMMIT `a111fb1`（handoff 2026-09-13 23:00 生成,dispatch 23:35,验证 23:38 通过）→ END_COMMIT 见 git log;工作窗口全程 RUN,08:40 起收尾;控制面 artifact 全夜不存在（无驳回）。
+- **今晚主题**:「NC3/NC9 验收缺口收官 + 一次被 soak 揪出的假绿修复 + 一次有意的结果语义修订 + 可复用过夜 soak 挂具入库」。
+- **里程碑 10 个全 PASS**:
+  - M1 NC3 overlay 联动收官(探针区域可视化+巨矩形描边钳制 footgun) — 6472fe3
+  - M2 NC9 可中断恢复(流式化+checkpoint/--resume,CLI 级等价实测) — 732f986
+  - M3 300s 协议 soak→**抓出真 bug**:walk 卡 step_01 假绿 — (证据轮)
+  - M4 学习草案质量修复(主色众数+锚点排除消失侧;e2e 断言真到 done;selftest 探针可触发/可区分校验) — 035c0e0
+  - M5 **RESULT 失败语义修订**:skill 终态失败→outcome=failed(原语义被测试钉死,使重试/通知/截图/反馈统计全链失效);成功路径不变 — 5e5a02e
+  - M6 EVENT→SSE defer 量化复核(900 周期 2 EVENT,稀疏性确认)→维持暂缓 — (复核轮)
+  - M7 NIGHTLY VERIFY 全电池 PASS+Go 边界映射钉住 — bc64f96
+  - M8 controller 30min 固定-walk soak(4 语义 EVENT 精确至 done,governor 上限终止优先级现场验证) — (证据轮)
+  - M9 过夜调度链 soak 挂具入库(上夜 scratch 教训制度化;PS 5.1 三连坑+Go 1.22 方法大小写坑全部文档化在案) — 6d9a728
+  - M10 **过夜 Go 侧调度链 soak:385/385 fires 精确,零失败零滞留,峰值 WS 22.1MB**(386 行采样留档) — (证据轮)
+- **Remote acceptance**:00:52 首轮 after_local_pass **PASS**(3m20s);08:07/08:10 复验 **FAIL×2**(exit=1,~56s,确定性)——自该 PASS 以来仅 docs 提交(零代码变更),速败签名与已立案的「节点 04:30 清理脚本按 mtime 误杀拷贝播种的 cargo 缓存」一致:昨夜的节点修复未配豁免,今晨 04:30 清理再次误杀;节点侧动作超出本仓库范围。**LOCAL CI 为验收门槛**,不以远端环境失败伪装代码失败;晨间运维清单:①节点重建 cargo 缓存(删 registry/src)②cleanup-ci-node.ps1 对该路径加豁免(运维侧 backlog 既有条目)。
+- **验证签名**:最终 NIGHTLY VERIFY PASS(08:07,exit 0:gofmt/vet/go test/go build/govulncheck/gosec/secret scan/cargo fmt+clippy+test+build/controller smoke 含协议段/17 步全链 smoke 含 native success/cancel/30s ONNX soak/NC9 selftests 含新探针校验/JS 守卫);今晚 LOCAL CI 独立 PASS ×6。
+- **安全**:govulncheck 0 可调用漏洞;gosec HIGH×HIGH 0;secret 扫描 0 命中;零真实游戏输入(全部 smoke 用临时库/夹具/假任务);soak 挂具 token 随机且只在临时目录。
+- **资源纪律**:GOMAXPROCS=2/-p 2;cargo 单实例;controller soak 3fps、调度 soak 每分钟一发 cmd.exe echo;无 GPU/无大下载;凌晨机器被他项目打到 90-100% CPU 时段降低了并发并转为挂具开发。
+- **已知问题/Deferred**:①首个真实 nano 模型/NC2 真实 UI 数据/NC9 真实素材(白天);②WGC 实体控制台复验(RDP 长期 BLOCKED);③EVENT→SSE 维持暂缓(量化理由在案);④win-devops 节点缓存误杀复发(晨间运维清单);⑤NC9 视频抽帧 wrapper 待有 ffmpeg 的环境。
+- **下一夜班建议**:①白天训练真实 nano 模型后走 NC1 收官对拍+NC5 首 skill;②NC9 真实录屏素材跑学习闭环(管线已含质量守护与断点续跑);③运维侧跟进 win-devops 清理豁免(远端验收恢复后复验);④夜间若无实机方向:soak 轮换(M9 挂具已可一键长跑)+defer 复核。
+
 ### 夜班收尾（2026-09-13 08:40 close）
 
 - **Session**:START_COMMIT `a29670b` → END_COMMIT `d467cd1`+close 记录;16+ 个 commit 全部推送,工作树干净。Handoff 验证于 23:38 通过并开工。
