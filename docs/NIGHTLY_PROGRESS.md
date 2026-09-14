@@ -7,6 +7,11 @@
 ## Current State
 
 近期落地：终端 rec 防护、非覆盖式 upsert、origin guard、ctl delete/depth。
+**2026-09-14/15 夜新增（M1-M10）**：训练数据桥(frames_to_dataset/prepare_dataset)自测试+守卫入电池、
+**tools/vision 六脚本 --selftest 全覆盖**；ps1 无 BOM 编码缺陷修复+电池编码守卫（PS 5.1 ANSI 误读族）；
+learn_route 损坏帧/残缺 checkpoint 点名拒绝；staticcheck 接入本地 CI；ctl dashboard/meta 资源补全；
+**controller --on-terminal stop**（skill 终态失败秒级反馈调度器，Go params 透传）；NC9 内存实测 21.1MB
+（预算 300MB）；协议 soak 4399 周期 done EVENT 恰好 1 次（D1 最强单轮证据）+调度链过夜 soak。
 **2026-09-08 夜班起主线切换至 Native Vision Controller（ROADMAP §9）**：
 NC0 基础 ✅ → NC1 推理运行时 ✅（运行时侧收官，仅首个真实模型待白天训练）→
 NC2 感知 🚧（L0/L1 地基 ✅，真实 UI 数据待白天）→
