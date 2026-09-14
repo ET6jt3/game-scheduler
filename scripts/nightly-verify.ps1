@@ -1,4 +1,4 @@
-# nightly-verify.ps1 - one-command overnight gate for game-scheduler.
+﻿# nightly-verify.ps1 - one-command overnight gate for game-scheduler.
 #
 # Chains every acceptance surface the night contract relies on:
 #   [1] scripts/ci-local.ps1          - Go (fmt/vet/test/build) + Rust gates
@@ -8,6 +8,7 @@
 #                                       examples/windows_smoke.ps1 full chain (incl. native + auto executor)
 #   [4] 30s ONNX soak                 - dry-run with the committed fixture,
 #                                       inference + cache stats asserted
+#   [5] NC9 selftests + pipeline e2e + dashboard JS guard + ps1 encoding guard
 # Exit code 0 only when every section passed. Each section logs its own
 # verdict so a partial night can see exactly what held.
 #
@@ -131,6 +132,36 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
 }
 else {
     Write-Host "SKIP dashboard JS check: node not found."
+}
+
+# ---------- [5c] PowerShell encoding guard ----------
+# Windows PowerShell 5.1 (the OS default shell) reads BOM-less .ps1 files as
+# ANSI (GBK on zh-CN), so non-ASCII literals silently become mojibake and
+# string comparisons fail while the same bytes pass under pwsh (UTF-8
+# default). The 2026-09-14/15 night: windows_smoke [16]/[17] compared
+# preflight resolution against 'auto→native' and broke only under
+# powershell.exe. Policy: every .ps1 carrying non-ASCII content MUST have a
+# UTF-8 BOM so both PowerShell editions decode it identically.
+Write-Host "== [5/5] ps1 encoding guard (BOM on non-ASCII scripts) =="
+$ps1Bad = @()
+foreach ($scanDir in @("scripts", "examples", "tools", "cmd", "internal")) {
+    $dir = Join-Path $repo $scanDir
+    if (-not (Test-Path $dir)) { continue }
+    foreach ($f in (Get-ChildItem -Path $dir -Recurse -File -Filter *.ps1)) {
+        $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+        $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+        if ($hasBom) { continue }
+        $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+        if ($text -match "[^\x00-\x7F]") { $ps1Bad += $f.FullName }
+    }
+}
+if ($ps1Bad.Count -gt 0) {
+    Write-Host "ps1 encoding guard FAILED — non-ASCII without UTF-8 BOM (PS 5.1 misdecodes these; add a BOM):"
+    $ps1Bad
+    $script:failed += "ps1-encoding-guard"
+}
+else {
+    Write-Host "ps1 encoding guard: OK"
 }
 
 # ---------- verdict ----------
