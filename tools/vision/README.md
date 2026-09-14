@@ -69,6 +69,10 @@ tools/vision/
 
 1. **prepare_dataset.py**: 校验 `images/ + labels/` (YOLO txt) 布局，
    写 `datasets/manifests/<name>.json`，输出 train/val 切分文件。
+   守卫：非数值坐标 / 越界框 / 负数或非整数类别索引 / 重复图片 stem
+   （同名 stem 会碰撞到同一 label）全部拒绝；`prepare_dataset.py
+   --selftest` 与 `frames_to_dataset.py --selftest` 是合成端到端守护
+   （走真实 CLI 子进程路径，nightly-verify 已接入）。
 2. **train.py**: 不带 `--yes` 只打印将要做的事（含将要下载的基模型）；
    带 `--yes` 且 ultralytics 可导入才真正训练。权重产物留在仓外。
 3. **export_onnx.py**: `.pt → .onnx`（opset/imgsz 显式指定），并在导出

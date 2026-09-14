@@ -85,12 +85,16 @@ if (Test-Path $soakLog) { Remove-Item $soakLog -ErrorAction SilentlyContinue }
 Set-Location -LiteralPath $repo
 
 # ---------- [5] NC9 learning-pipeline selftests (stdlib-only, offline) ----------
-Note "== [5/5] NC9 chain selftests (learn_route + draft_to_skill) =="
+Note "== [5/5] NC9 chain selftests (learn_route + draft_to_skill + dataset bridge) =="
 Set-Location -LiteralPath (Join-Path $repo "tools\vision")
 python learn_route.py --selftest
 if ($LASTEXITCODE -ne 0) { $script:failed += "learn-route-selftest" }
 python draft_to_skill.py --selftest
 if ($LASTEXITCODE -ne 0) { $script:failed += "draft-to-skill-selftest" }
+python frames_to_dataset.py --selftest
+if ($LASTEXITCODE -ne 0) { $script:failed += "frames-to-dataset-selftest" }
+python prepare_dataset.py --selftest
+if ($LASTEXITCODE -ne 0) { $script:failed += "prepare-dataset-selftest" }
 
 # Chained fixture e2e: deterministic synthetic frames -> learn -> convert ->
 # controller dry-run replay must reach RESULT done (ROADMAP NC9 test item).
