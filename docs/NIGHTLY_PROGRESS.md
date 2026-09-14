@@ -43,7 +43,9 @@ Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/co
 | M1 | **训练数据链路自测试+加固**:`frames_to_dataset.py`/`prepare_dataset.py` 各获 `--selftest`(子进程走真实 CLI,合成 pnglite 夹具,stdlib-only):happy path(manifest 字段/切分计数/确定性种子/列表互斥)+全部守卫;**三个真 footgun 修复**:①prepare_dataset 非数值坐标原为裸 traceback→清洁报错;②负数类别索引原被静默接受→拒绝;③重复图片 stem(a.png+a.jpg 碰撞同一 label 文件,静默毒化数据集)两脚本均拒绝;nightly-verify [5] 段接线两个新 selftest;README 同步 | PASS | 5f819c2 | 四工具 selftest 全绿;NIGHTLY VERIFY PASS 含新段 |
 | M2 | **ps1 编码缺陷（电池当场抓获的真问题）**:首次跑 nightly-verify 用 powershell.exe(5.1)→windows_smoke [16]/[17] 双 FAIL,签名=`want auto鈫抧ative`(期望串 UTF-8 箭头被 5.1 按 ANSI/GBK 误读;实际 resolution 值正确)——同码在 pwsh(7+)下 08:07 曾 PASS,纯 shell-edition 敏感。修复=5 个含非 ASCII 的 .ps1 统一加 UTF-8 BOM(ci-local/soak-scheduler/planner_quickstart/run-admin/windows_smoke;纯字节前缀,双版本 PowerShell 解码一致) | PASS | 42e7365 | 修后 5.1 下电池全绿:[16]/[17] OK,NIGHTLY VERIFY PASS |
 
-**Remote acceptance**:待首拍后执行（见后续记录）。
+**Remote acceptance**:00:21 首拍 after_local_pass **FAIL**(exit=1,1m45s)——已凭节点 agent log 端点(token 走本地配置,未回显)**确证签名**:Go 侧全绿,败于 `cargo clippy: failed to download adler2`=节点 cargo registry 缓存今晨 04:30 清理再次误杀(节点无外网,下载必然失败);同窗 QX/AetherScope 亦 FAIL、Go-only 项目全 PASS,与「Rust 门禁项目才倒」完全一致。SSH(publickey 拒)/SMB(拒绝)/xnightops CLI(无维护命令)均无节点修复通道——节点侧动作(重建 registry\src + cleanup 豁免)仍属晨间运维清单,超出本仓库权限。**LOCAL CI 为验收门槛,不以远端环境失败伪装代码失败**。
+
+| M3 | **ps1 编码守卫进电池**:nightly-verify 新增 [5c]——扫描 scripts/examples/tools/cmd/internal 下含非 ASCII 但无 UTF-8 BOM 的 .ps1 即 FAIL 并点名(锁死 M2 的 bug 类别:5.1 按 ANSI 误读);守卫首轮自捕获 nightly-verify.ps1 自己(注释引用了 auto→native 箭头),按策略补 BOM;负向测试(合成无 BOM 探针文件)确认可抓 | PASS | ad65d0d | NIGHTLY VERIFY PASS(含新段);正/负双向实测 |
 
 ### Night 2026-09-13 → 2026-09-14（夜班 agent 记录）
 
