@@ -29,6 +29,22 @@ NC9 视频学习管线 🚧（**学习质量闭环 2026-09-13/14 夜**：锚点�
 
 ## Night Runs
 
+### Night 2026-09-14 → 2026-09-15（夜班 agent 记录）
+
+Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/codes/game-scheduler,git_head=eb9a6d4=本地 HEAD,dispatch_at=23:38,window 23:00-08:40/09:00;manifest+prompt 完整）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0:Go 22 包 + cargo 168 测试 + govulncheck/gosec/secret 全绿）。23:47 过夜调度链 soak 挂具起跑（468min,随机端口 18385,临时目录隔离）。
+
+**Discovery Pass #1**（23:45 前后）:
+- 候选:①训练数据桥自测试补缺（frames_to_dataset/prepare_dataset 是 tools/vision 唯一无 --selftest、未接入 nightly-verify 的环节,仅一次 M26 人工验证——明天白天首训的必经链路）②learn_route checkpoint 损坏 UX ③远端节点 cargo 缓存复查 ④EVENT→SSE 维持暂缓 ⑤ps1 编码加固（后来自动入选）;
+- 选①为主 milestone（直接 de-risk 白天 #1 优先级）;
+- export_onnx→manifest.rs 契约人工复核:字段逐一对齐（schema_version/name/version/game_profile/input_size/labels/default_confidence/weights/notes）,无需改动。
+
+| M | 内容 | Verdict | Commit | 验收证据 |
+|---|------|---------|--------|----------|
+| M1 | **训练数据链路自测试+加固**:`frames_to_dataset.py`/`prepare_dataset.py` 各获 `--selftest`(子进程走真实 CLI,合成 pnglite 夹具,stdlib-only):happy path(manifest 字段/切分计数/确定性种子/列表互斥)+全部守卫;**三个真 footgun 修复**:①prepare_dataset 非数值坐标原为裸 traceback→清洁报错;②负数类别索引原被静默接受→拒绝;③重复图片 stem(a.png+a.jpg 碰撞同一 label 文件,静默毒化数据集)两脚本均拒绝;nightly-verify [5] 段接线两个新 selftest;README 同步 | PASS | 5f819c2 | 四工具 selftest 全绿;NIGHTLY VERIFY PASS 含新段 |
+| M2 | **ps1 编码缺陷（电池当场抓获的真问题）**:首次跑 nightly-verify 用 powershell.exe(5.1)→windows_smoke [16]/[17] 双 FAIL,签名=`want auto鈫抧ative`(期望串 UTF-8 箭头被 5.1 按 ANSI/GBK 误读;实际 resolution 值正确)——同码在 pwsh(7+)下 08:07 曾 PASS,纯 shell-edition 敏感。修复=5 个含非 ASCII 的 .ps1 统一加 UTF-8 BOM(ci-local/soak-scheduler/planner_quickstart/run-admin/windows_smoke;纯字节前缀,双版本 PowerShell 解码一致) | PASS | 42e7365 | 修后 5.1 下电池全绿:[16]/[17] OK,NIGHTLY VERIFY PASS |
+
+**Remote acceptance**:待首拍后执行（见后续记录）。
+
 ### Night 2026-09-13 → 2026-09-14（夜班 agent 记录）
 
 Handoff 验证 23:38 通过（night=2026-09-13,project=game-scheduler,git_head=a111fb1=本地 HEAD,dispatch_at=23:35,window 23:00-09:00;prompt GB18030 混编码含 1 字节截断,清洗后完整执行）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0,含 govulncheck/gosec/secret 扫描全绿）。
