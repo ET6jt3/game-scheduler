@@ -1,4 +1,4 @@
-# soak-scheduler.ps1 - overnight scheduling-chain soak for game-scheduler.
+﻿# soak-scheduler.ps1 - overnight scheduling-chain soak for game-scheduler.
 #
 # Boots an ISOLATED temp server instance (own port, own data dir, random
 # token), creates a game/route/task against a HARMLESS fake tool (copied

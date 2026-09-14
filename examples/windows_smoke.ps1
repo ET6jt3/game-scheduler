@@ -1,4 +1,4 @@
-# windows_smoke.ps1 - end-to-end acceptance for game-scheduler on Windows.
+﻿# windows_smoke.ps1 - end-to-end acceptance for game-scheduler on Windows.
 #
 # Walks the full chain with a HARMLESS fake tool (a copied cmd.exe) — no game,
 # no BetterGI/March7th/Fhoe/ok-ww/M9A, no mouse/keyboard input:

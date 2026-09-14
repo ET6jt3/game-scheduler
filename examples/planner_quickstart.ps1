@@ -1,4 +1,4 @@
-# planner_quickstart.ps1 — character planner walkthrough (Windows PowerShell)
+﻿# planner_quickstart.ps1 — character planner walkthrough (Windows PowerShell)
 #
 # Prereqs:
 #   1. Server running locally:  .\server.exe   (defaults to http://127.0.0.1:8080)

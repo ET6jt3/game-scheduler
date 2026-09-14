@@ -1,4 +1,4 @@
-# XNightOps local CI gate — the single acceptance entry for night work.
+﻿# XNightOps local CI gate — the single acceptance entry for night work.
 # Local only; exit code is authoritative; GitHub hosted CI is not a gate.
 # -Race: additionally run the Go suite under the race detector, using the
 #        portable mingw64 at D:\tools\mingw64 for CGO (see

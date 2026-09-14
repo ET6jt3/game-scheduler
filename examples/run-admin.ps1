@@ -1,4 +1,4 @@
-# run-admin.ps1 — launch the scheduler server as Administrator.
+﻿# run-admin.ps1 — launch the scheduler server as Administrator.
 #
 # Tools like BetterGI must run elevated to simulate input into the game (which
 # itself runs elevated); a child process can only inherit elevation, so the
