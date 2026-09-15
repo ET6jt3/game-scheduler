@@ -34,6 +34,17 @@ NC9 视频学习管线 🚧（**学习质量闭环 2026-09-13/14 夜**：锚点�
 
 ## Night Runs
 
+### Night 2026-09-15 → 2026-09-16（夜班 agent 记录）
+
+Handoff 验证 23:39 通过（night=2026-09-15,project=game-scheduler,repo=D:/codes/game-scheduler,git_head=6457e00=本地 HEAD,dispatch_at=23:38,window 23:00-08:40/09:00;prompt SHA-256 前缀 5fbf6d6b07794978 实测吻合）。prompt 含 1 字节截断（`根因二` 的「二」缺第三字节,UTF-8 解码失败——与 09-13 夜同类 Prompt Factory 编码问题）,清洗后完整执行（清洗稿存 .nightly/overnight-prompt-tonight-clean.md,不入库）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0:.nightly/ci-baseline-tonight-0915.log,Go 22 包 + cargo + govulncheck/gosec/secret/staticcheck 全绿）。
+
+**连续性收口（昨夜遗留,00:05 完成,无代码变更）**:09-14/15 夜 23:47 起跑的 468min 过夜调度链 soak 于 **05:53 被外部会话/主机重启终止**（晨报注明 "process restart while RUNNING";server.log/WAL mtime 05:53 为证）,未及 ~07:35 终验断言。**已归档证据并补做分析**（.nightly/soak-sched-0915-archive/）:358 个采样=358 分钟 358 次点火精确,failed_24h=0 全程,running>0 仅 9 个采样（均为短任务进行中,属正常）,executions_total 严格单调（0 次回退;19 次同分钟相等步=采样相位伪影,无害）,WS 16.1→18.9→11.7MB 平坦无泄漏征兆。**结论:提前终止非调度缺陷,358 连续分钟点火零失败为又一强质量数据点**;断言未跑属证据链缺口,如实记录。00:02 今晚自有 300min 调度链 soak 起跑（预计 ~05:05 收车,soak-sched-0916.log）。
+
+**Discovery Pass #1**（00:00 前后）:
+- 候选:①昨夜 soak 证据归档+连续性记录（已即时执行,见上）②ROADMAP 文档漂移修复（Current Phase 仍写 NC1 🚧,§9 缺 09-14/15 夜记录——影响后续夜班/晨报衔接）③昨夜新代码敌意复审（controller --on-terminal stop + Go on_terminal params 透传,9fba97a）④今晚协议 soak 轮换⑤NC6 EVENT→SSE（两次量化复核维持暂缓,不再重开）;
+- 主线选定:②先行（30min 级,纯文档）→ ③为今晚主工程 milestone;④视机器负载择机;
+- 安全三件套随基线 CI 全绿。
+
 ### Night 2026-09-14 → 2026-09-15（夜班 agent 记录）
 
 Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/codes/game-scheduler,git_head=eb9a6d4=本地 HEAD,dispatch_at=23:38,window 23:00-08:40/09:00;manifest+prompt 完整）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0:Go 22 包 + cargo 168 测试 + govulncheck/gosec/secret 全绿）。23:47 过夜调度链 soak 挂具起跑（468min,随机端口 18385,临时目录隔离）。

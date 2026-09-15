@@ -21,7 +21,11 @@ Current Focus:
 Native Vision Controller
 
 Current Phase:
-NC1 — Vision Runtime (ONNX) 🚧 运行时已落地,首个真实模型待训练
+运行时栈已就绪——NC0 ✅ / NC1 运行时 ✅(仅首个真实模型待白天) / NC2 L0-L1 ✅(真实 UI 数据待白天) /
+NC3 地基+overlay ✅ / NC4 输入层 ✅(gated 实机 selftest 待操作者) / NC6 ✅ / NC7 ✅ /
+NC9 离线学习闭环 ✅(真实素材待白天)。
+下一批推进全部依赖白天资源:①首个真实 nano 模型(NC1 收官对拍)②NC2 真实 UI 数据③NC9 真实录屏素材④NC5 真实 skill 流程设计。
+夜班(无真实模型/素材)主线:可靠性审计、soak 证据轮换、测试与文档加固。
 ```
 
 NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`controller/` Rust crate:GameWindow、四坐标系 Transform、SafetyGovernor、捕获后端、dry-run 闭环;详见 §9)。**不要倒退重复实现 NC0。**
@@ -171,7 +175,7 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:NC1 🚧(运行时已落地)。
 - **Out of Scope**:OCR 训练;语义理解。
 
-### NC3 — State Machine / Skill Engine 🚧(引擎地基已落地)
+### NC3 — State Machine / Skill Engine 🚧(地基+overlay 联动 ✅;真实业务 Skill 待 NC5)
 
 - **Status**:🚧 In Progress(2026-09-09/10 夜班:数据驱动定义+纯转移评估器+dry-run 集成落地;真实业务 Skill 待 NC5)。
 - **Objective**:Skill 是状态机,不是 `if sees button: click`。
@@ -202,9 +206,9 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Dependencies**:NC0–NC4。
 - **Out of Scope**:开放世界;多游戏泛化(先一个游戏打透)。
 
-### NC6 — Scheduler Integration 🚧(会话链路已落地,UI/auto 收尾待办)
+### NC6 — Scheduler Integration ✅(核心验收达成;EVENT→SSE 维持暂缓)
 
-- **Status**:🚧 In Progress(2026-09-10/11 夜班:协议+执行器+调度分发全落地,真实 controller 全链路验收 PASS;2026-09-11/12 夜班:`auto` 执行模式落地)。核心验收已达成:native 任务从 API/ctl 触发 → preflight → 调度 → 协议会话 → Execution 落库,取消路径同样有验收。
+- **Status**:✅ Done(2026-09-10/11 夜班:协议+执行器+调度分发全落地,真实 controller 全链路验收 PASS;2026-09-11/12 夜班:`auto` 执行模式落地;2026-09-13/14 夜:RESULT 失败语义修订——skill 终态失败→outcome=failed;2026-09-14/15 夜:`--on-terminal stop` 失败会话秒级收车+Go params 透传)。余 EVENT→SSE 事件流打磨维持暂缓(D1 事件稀疏+管道成本 vs 无真实技能流量,量化复核见 2026-09-13/14 夜记录)。
 - **已落地**:
   - 协议 schema v1 冻结(`controller/src/protocol.rs` serde 类型+测试;docs/controller-protocol-draft.md,D1–D4 全部定稿);
   - controller `--protocol` 线模式(HELLO/READY/EVENT/RESULT,RFC3339,stdout 纯协议;终态 EVENT 门控防每周期重复);
@@ -234,9 +238,9 @@ NC0 — Native Controller Foundation ✅ 已完成(2026-09-08/09 夜班,`control
 - **Scope(届时再细化)**:短距离移动、相机控制、minimap perception、waypoint navigation、战斗状态识别、path recovery、卡死恢复;开放世界导航是后期目标。
 - **Out of Scope**:一切违反 §7 安全红线的能力;开放世界导航在 NC8 内部也排最后。
 
-### NC9 — Route & Skill Learning(视频学习路线) ⬜
+### NC9 — Route & Skill Learning(视频学习路线) 🚧(离线学习管线闭环 ✅;真实素材/真实模型待白天)
 
-- **Status**:⬜ Planned。**学习与模拟侧可先行**(纯离线工作,夜班安全);**实际游戏测试显式 deferred**——待真实游戏控制测试环境可用后再进入(NC5 流程)。
+- **Status**:🚧 In Progress(离线侧;学习质量闭环+流式化+checkpoint/--resume+内存实测均已落地,见 §9 2026-09-13/14 与 2026-09-14/15 夜记录)。**学习与模拟侧可先行**(纯离线工作,夜班安全);**实际游戏测试显式 deferred**——待真实游戏控制测试环境可用后再进入(NC5 流程)。
 - **Motivation**:当前没有可安全进行真实游戏控制测试的环境。先从视频内容离线学习"路线与操作"(B 站采集路线、关卡教程、跑图全流程等),把时间投入转化为可执行的 Skill/Route 资产,环境就绪后直接进入实测。
 - **Objective**:自动/半自动地把攻略视频转成结构化 Route / SkillDefinition 草案,并能在捕获窗口或录制帧上以 **dry-run 形式模拟输出**(只记录计划动作,不发送任何真实输入),全程资源轻量。
 - **Scope**:
@@ -337,6 +341,18 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 - 其余:EVENT→SSE 暂缓复核(量化:900 周期 2 EVENT,稀疏性确认);NIGHTLY VERIFY 全电池 PASS;win-devops 远端验收 PASS。
 
 
+### 2026-09-14/15 夜班:训练桥加固 + 编码守卫 + 协议 soak 收官 + NC6 快速失败
+
+- **训练数据链路自测试+加固** ✅:frames_to_dataset/prepare_dataset 获 `--selftest`;三处真 footgun 修复(非数值坐标裸 traceback→清洁报错/负类别索引静默接受→拒绝/重复 stem 静默毒化→拒绝);learn_route 损坏帧与残缺 checkpoint 点名拒绝 — `5f819c2`/`27cf025`。
+- **ps1 编码族修复+守卫** ✅:5 个含非 ASCII 的 .ps1 补 UTF-8 BOM(PS 5.1 按 ANSI 误读族);nightly-verify [5c] 编码守卫;PS 5.1 控制台代码页解码链闭合(smoke/verify 自钉 `[Console]::OutputEncoding=UTF8`) — `42e7365`/`ad65d0d`/`0424bc1`。
+- **staticcheck 接入 ci-local 门禁** ✅(全仓零发现) — `45c1278`;**ctl dashboard/meta 资源补全** — `0424bc1`。
+- **tools/vision 六脚本 --selftest 全覆盖** ✅(train.py/export_onnx.py 补齐;manifest 契约逐字段钉死) — `90de323`。
+- **NC9 内存预算实测** ✅:600 帧 learn 全程 WS 峰值 21.1MB(预算 300MB,~14× 裕度)。
+- **NC6 `--on-terminal stop`** ✅:skill 终态失败秒级结束会话(调度侧 Execution 不再空转卡 running);Go native params `on_terminal` 校验+透传;协议集成测试双向钉死 — `9fba97a`。
+- **D1 终态门控长程证据**:两轮协议 soak 合计 **9775 周期,done EVENT 每轮恰好 1 次**;第二轮 4h 尝试被 governor max_session 干净终止(outcome=stopped——安全设计实测生效)。
+- **过夜调度链 soak**:468min 计划,05:53 被外部会话重启提前终止;归档证据 358/358 点火精确零失败(连续性记录见 NIGHTLY_PROGRESS 09-15/16 夜)。
+
+
 ### 2026-09-08/09 夜班:NC0 全部完成 ✅
 
 - **M1** ✅:`controller/` Rust crate 骨架 + GameWindow(HWND 枚举 / 精确 client rect / per-monitor-v2 DPI / ClientToScreen / foreground / 变化检测)— `60f0719`。
@@ -359,13 +375,17 @@ BetterGI / March7thAssistant / Fhoe-Rail / ok-ww / M9A 的现有适配器:
 - **跨机验证**:win-devops 首次全量跑 Rust 门禁(129 测试)PASS——节点已装 Rust;节点 WinML 兼容线 ir3/opset9、服务会话无交互桌面(环境发现见 NIGHTLY_PROGRESS)。
 - **未做(按计划)**:首个真实 nano 模型(白天采集/标注/训练);WGC 非 RDP 复验;输入发送(NC4,红线内未触碰);下一阶段 NC2 真实 UI 数据补全。
 
-### 下一夜班起点:NC2 真实数据补全 / NC4 输入设计评审
+### 下一夜班起点
 
-前置:①用 `tools/vision/` 完成首个真实 nano 模型的采集/标注/训练/导出(白天);②NC4 输入控制器的安全设计评审(SendInput 封装 + governor 硬前置, Dummy window 验证);③NC6 协议草案(docs/controller-protocol-draft.md)评审定稿。
+夜班(无真实模型/素材)主线:**可靠性审计、soak 证据轮换、测试与文档加固**(NC6 EVENT→SSE 维持暂缓,勿重开)。
+白天依赖项(按优先级):①首个真实 nano 模型——`tools/vision/` 全链路已就绪(NC1 收官对拍)②NC2 真实 UI 数据补全③NC9 真实录屏素材④NC5 真实 skill 流程设计(依赖①②)。
 
 夜班安全备选:**NC9 视频学习路线**(纯离线学习 + dry-run 模拟输出,不依赖真实游戏环境;见 §3 NC9)。
 
 ## 10. 变更记录
+
+- **2026-09-15/16(夜)**:本文档状态同步(Current Phase 刷新;NC3/NC6/NC9 头部与状态行对齐实际;§9 补 09-14/15 夜记录;"下一夜班起点"更新)——纯文档漂移修复,无代码行为变更。
+- **2026-09-14/15(夜)**:NC6 收官件 `--on-terminal stop`;训练桥自测试+守卫;ps1 编码族修复+守卫入电池;staticcheck 入 CI;tools/vision 自测全覆盖;NC9 内存实测;协议 soak 9775 周期收官。
 
 - **2026-09-12/13(夜)**:NC7 功能面收官 ✅——执行反馈统计(`GET .../feedback` + ctl + 看板弹窗,只读 rollup,不自动改 owned_count/生命周期)与无路线纯 skill 推荐(create-task → 纯 native 任务);README 中英与本文档同步。
 - **2026-09-10/11(夜)**:NC4 输入层落地(SendInput+governor 硬前置,默认零输入);NC6 主体落地(协议 schema 冻结、--protocol 线模式、Go 会话执行器、native 调度分发、真实 controller 全链路+取消验收);NC1 deferred 清零(device 配置化+推理超时线程化);安全扫描接入本地 CI;NC9 视频学习路线入路线图且学习管线最小闭环打通(帧→draft→skill→回放 DONE)。
