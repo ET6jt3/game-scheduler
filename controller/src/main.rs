@@ -300,9 +300,18 @@ impl DryRunOptions {
         if !matches!(opts.device.as_str(), "cpu" | "gpu") {
             return Err(format!("--device must be cpu|gpu, got {:?}", opts.device));
         }
-        if let Some(v) = opt(args, "--on-terminal") {
-            if !matches!(v.as_str(), "continue" | "stop") {
-                return Err(format!("--on-terminal must be continue|stop, got {v:?}"));
+        // A present-but-valueless flag must error, not silently mean the
+        // default "continue" — that would exactly defeat the fast-fail the
+        // operator asked for. (opt() maps both "absent" and "dangling" to
+        // None, so presence is checked separately.)
+        if args.iter().any(|a| a == "--on-terminal") {
+            match opt(args, "--on-terminal").as_deref() {
+                Some("continue") | Some("stop") => {}
+                other => {
+                    return Err(format!(
+                        "--on-terminal must be continue|stop, got {other:?}"
+                    ))
+                }
             }
         }
         if opts.infer_timeout_ms == 0 || opts.infer_timeout_ms > 300_000 {
@@ -929,7 +938,13 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
             }
         }
 
-        if terminal_stop {
+        // Safety precedence (documented contract): if the governor demanded
+        // a stop in this SAME cycle, the bottom-of-loop branch ends the
+        // session with outcome=stopped and its reason — the flag's early
+        // break must not outrank it. Both paths end the session now; only
+        // the reported outcome differs, and stopped is the more urgent
+        // signal for the scheduler.
+        if terminal_stop && !report.pre_verdict.is_stop() {
             eprintln!(
                 "dry-run: skill failed terminally - ending the session early (--on-terminal stop)"
             );
@@ -1899,6 +1914,22 @@ mod tests {
                 "{ok} must be accepted"
             );
         }
+    }
+
+    #[test]
+    fn on_terminal_flag_is_validated_including_dangling() {
+        let o = DryRunOptions::parse(&args(&["--dry-run", "--on-terminal", "stop"])).expect("ok");
+        assert!(o.on_terminal_stop);
+        let o =
+            DryRunOptions::parse(&args(&["--dry-run", "--on-terminal", "continue"])).expect("ok");
+        assert!(!o.on_terminal_stop);
+        let e = DryRunOptions::parse(&args(&["--dry-run", "--on-terminal", "bogus"])).unwrap_err();
+        assert!(e.contains("continue|stop"), "{e}");
+        // Dangling (flag present, value missing) must error rather than
+        // silently mean the default "continue" — that would defeat the
+        // fast-fail the operator explicitly requested.
+        let e = DryRunOptions::parse(&args(&["--dry-run", "--on-terminal"])).unwrap_err();
+        assert!(e.contains("continue|stop"), "{e}");
     }
 
     #[test]
