@@ -45,6 +45,12 @@ Handoff 验证 23:39 通过（night=2026-09-15,project=game-scheduler,repo=D:/co
 - 主线选定:②先行（30min 级,纯文档）→ ③为今晚主工程 milestone;④视机器负载择机;
 - 安全三件套随基线 CI 全绿。
 
+| M | 内容 | Verdict | Commit | 验收证据 |
+|---|------|---------|--------|----------|
+| M2 | **ROADMAP 文档漂移修复**:Current Phase 从「NC1 🚧」刷新为运行时栈全景(NC0/NC1运行时/NC2 L0-L1/NC3/NC4/NC6/NC7/NC9离线 ✅,推进项全数依赖白天资源);NC3/NC6/NC9 头部与状态行对齐实际(NC6→✅ 含失败语义修订与 --on-terminal 补记;NC9→🚧 离线侧);§9 补 09-14/15 夜完整记录;「下一夜班起点」从早已完成的 NC2/NC4 更新为夜班可靠性主线+白天依赖清单;§10 变更记录两条 | PASS | 35abf50 | 纯文档;README「当前开发方向」核对无漂移(本就指向 ROADMAP) |
+| M3 | **昨夜新代码敌意复审→两处真加固**:①`--on-terminal stop` 的提前 break 位于循环底部 governor 检查**之前**——同周期内 governor 要求停止时,RESULT 会报 skill-failed 而非 stopped,违背「安全停止优先」成文契约;修为 pre_verdict.is_stop() 时让位(两者都会立即结束会话,仅上报结果不同,stopped 是更紧急信号);②**悬空旗标**`--on-terminal`(有旗标无值)原经 opt() 的 None 静默降级为默认 continue——恰好挫败操作者要的快速失败;现报错。Go 侧 on_terminal 校验/透传复审无缺陷 | PASS | e1ae286 | 单测钉全解析矩阵(含悬空);协议集成 5/5 绿(含 30s 预算 <25s 早收车与无旗标跑满双侧);lib 133 绿;clippy 0;LOCAL CI PASS。同周期 governor+失败重合无确定性夹具(governor max_session 为墙钟常量)——优先级为结构性修复+注释,诚实记录未做集成钉 |
+| M4 | **环境知识制度化**:Windows 应用控制对 go-build 临时目录新哈希测试二进制的**间歇性**拦截(哈希信誉制,bash 直跑同二进制不受影响)+「编到 .nightly/bin 再直跑」workaround,从陈旧夜班 scratch(从未入库)迁入 docs/MR_ENVIRONMENT.md;本夜基线 22 包直跑全绿证实间歇性,按故障排查知识记录而非常备 workaround | PASS | 496db59 | 文档;基线/CI 日志佐证当前不需要 workaround |
+
 ### Night 2026-09-14 → 2026-09-15（夜班 agent 记录）
 
 Handoff 验证 23:39 通过（night=2026-09-14,project=game-scheduler,repo=D:/codes/game-scheduler,git_head=eb9a6d4=本地 HEAD,dispatch_at=23:38,window 23:00-08:40/09:00;manifest+prompt 完整）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0:Go 22 包 + cargo 168 测试 + govulncheck/gosec/secret 全绿）。23:47 过夜调度链 soak 挂具起跑（468min,随机端口 18385,临时目录隔离）。
