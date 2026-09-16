@@ -1,5 +1,5 @@
 """Cross-platform package acceptance; only executes the supplied harmless fixture."""
-import argparse, json, os, pathlib, shutil, socket, subprocess, tempfile, time, urllib.request
+import argparse, json, os, pathlib, shutil, socket, subprocess, sys, tempfile, time, urllib.request
 
 def main():
     parser=argparse.ArgumentParser()
@@ -33,8 +33,8 @@ def main():
             nonlocal process,log
             log=open(package/'Logs'/'smoke.log','ab')
             if use_launcher and os.name=='nt':
-                result=subprocess.run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(package/'App'/'Portable.ps1'),'-Action','Start','-NoBrowser'],capture_output=True,text=True,timeout=45)
-                assert result.returncode==0,(result.stdout,result.stderr)
+                result=subprocess.run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(package/'App'/'Portable.ps1'),'-Action','Start','-NoBrowser'],stdout=log,stderr=log,timeout=45)
+                assert result.returncode==0,(package/'Logs'/'smoke.log').read_text(errors='replace')
                 process=None
             else:
                 process=subprocess.Popen([str(package/'App'/('server'+suffix)),'-config',str(package/'Config'/'config.json')],cwd=root,stdout=log,stderr=log)
@@ -58,6 +58,7 @@ def main():
         def check(condition,label):
             assert condition,label
             reports.append(label)
+            print('PASS: '+label,file=sys.stderr,flush=True)
         def preflight(instance,kind='raw',params=None):return api('/api/helpers/'+instance+'/preflight','POST',{'type':kind,'params':{'raw_args':['space value','literal; echo NO','中文','${ROOT}','']} if params is None else params})
         def run_task(task):
             execution=api('/api/tasks/'+str(task['id'])+'/run','POST',{})
@@ -73,7 +74,7 @@ def main():
             duplicate=subprocess.run([str(package/'App'/('server'+suffix)),'-config',str(package/'Config'/'config.json')],capture_output=True,text=True,timeout=10)
             check(duplicate.returncode!=0 and 'another server owns' in duplicate.stdout+duplicate.stderr,'duplicate server rejected before database reconciliation')
             if os.name=='nt':
-                result=subprocess.run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(package/'App'/'Portable.ps1'),'-Action','Start','-NoBrowser'],capture_output=True,text=True,timeout=45)
+                result=subprocess.run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(package/'App'/'Portable.ps1'),'-Action','Start','-NoBrowser'],stdout=log,stderr=log,timeout=45)
                 check(result.returncode==0,'launcher recognizes existing instance')
             for identity,path,mode in [('external',str(fixture),'external'),('managed','${HELPERS}/'+managed.name,'managed')]:
                 api('/api/helpers','POST',{'id':identity,'helper_id':'ok-nte','name':identity,'location_mode':mode,'executable':path,'enabled':True})

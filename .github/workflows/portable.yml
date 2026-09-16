@@ -34,6 +34,7 @@ jobs:
           go build -o "$env:RUNNER_TEMP/fake-helper.exe" ./scripts/testdata/fake-helper
           if ($LASTEXITCODE -ne 0) { throw 'fixture build failed' }
       - name: Smoke package, relocation, persistence and launchers
+        timeout-minutes: 5
         shell: pwsh
         run: |
           python scripts/portable-smoke.py --package dist/GameScheduler-Portable --fixture "$env:RUNNER_TEMP/fake-helper.exe" | Tee-Object -FilePath dist/windows-smoke-report.json
