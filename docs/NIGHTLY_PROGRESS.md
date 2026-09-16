@@ -59,6 +59,8 @@ Handoff 验证 23:39 通过（night=2026-09-16,project=game-scheduler,repo=D:/co
 | M3 | **monitor stale fail-safe 可观测化**:连续 3 次采样失败→snapshot 标 stale+last_error（API 新增两字段）,告警限频（首条+每分钟一条）;**fail-safe 语义=闩锁不因失去数据而自动释放**（不可测的机器不放行新定时任务）,好样本治愈 stale 回正常迟滞;dashboard 资源面板加「⟳ 数据过期」徽章+横幅（解释闩锁保持）;定向 -race 干净 | PASS | ec78f9c | 新测试 2（stale 标记/fail-safe/治愈+限频断言）;monitor 8 测试全绿;api/task/monitor 定向绿;LOCAL CI PASS;node --check JS 守卫过 |
 | M4 | **文档同步**:README（zh/en）资源监控节补 stale 语义与 fail-safe 契约;native-quickstart 故障排查表补「`--flag requires a value`」条目（对应 M0 新报错的操作者条目） | PASS | e117acf | 纯文档;与 ec78f9c/f27793b 行为一致 |
 | M5 | **会话循环终态 stderr 门控（D1 对齐）**:`skill: DONE/FAILED` 从每周期重复改为首次门控（协议 EVENT 早已门控,人读通道补齐）;Failed-after-done 不可达→无观测路径丢失输出 | PASS | b436cc3 | cargo test 全量 163 绿（lib 133+bin 16+集成 14）;clippy 0 |
+| M6 | **config 敌意复审→文件路径 overload_policy 零校验 footgun**:env 路径有告警拒绝,config 文件的 `"Pause"`/`" pause "` 静默降级 pause 门为 alert-only（操作者以为定时任务受保护实际没有）;文件值现归一化（大小写/空白）,未知值启动即报错;`GS_AUTH_TOKEN` trim（setx 尾随换行曾致全 Bearer 401 谜题） | PASS | 35f1027 | 新测试 2（文件策略归一化/拒绝+env 优先级、token trim）;config 全绿;server/ctl build OK |
+| M7 | **transform/nms/timeout/cache 轮审→cache 真 P1:熔断饿死**。内层推理失败后 cache 只跳过插入,未失效复用路径——last_key 捷径对同一帧永远重放失败前检测,内层不再被调用,错误只暴露一次（forced refresh 处）,**consecutive-failure breaker 被静默命中周期重置→永不触发**,卡死推理的会话靠陈旧检测跑到时长结束（违背 TimeoutDetector+熔断的设计意图）。修=`inner_failing` 闩锁:失败后绕过捷径与 cache 命中,强制每周期真实推理直到下一个真成功;发现窗口由既有 refresh_every=32 有界 | PASS | 06dec3e | 新判别测试（refresh_every=2:cycle3 在旧码重放陈旧/新码重跑推理,misses==3 钉死）;cargo 全量 173 绿;clippy 0;transform/nms/timeout 审计零缺陷（letterbox 数学/类感知 NMS/超时 worker 语义全部复核） |
 
 ### Night 2026-09-15 → 2026-09-16（夜班 agent 记录）
 
