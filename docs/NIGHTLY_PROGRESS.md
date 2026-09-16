@@ -34,6 +34,32 @@ NC9 视频学习管线 🚧（**学习质量闭环 2026-09-13/14 夜**：锚点�
 
 ## Night Runs
 
+### Night 2026-09-16 → 2026-09-17（夜班 agent 记录）
+
+Handoff 验证 23:39 通过（night=2026-09-16,project=game-scheduler,repo=D:/codes/game-scheduler,git_head=6653936=本地 HEAD,dispatch_at=23:41,window 23:00-08:40/09:00;prompt 完整无截断——与 09-13/09-15 两夜的 Prompt Factory 编码问题不同,本轮无清洗需求）。控制面 artifact 不存在=维持 RUN。23:41 准时开工。开工时工作树有一处**上夜收尾后遗留的未提交修改**（controller/src/main.rs dangling 旗标校验的推广实现,编译+lib 测试已绿但无测试钉、未落账）——作为 M0 立即收口。
+
+**Discovery Pass #1**（23:42 前后）:
+- Rust 侧 M0 落地后 dangling 家族已完备→审计 Go↔Rust 集成缝:Go buildNativeSession 用 slice 构造 flag/value 恒成对、空值守卫齐备,dangling 风险低;session.go 已有 stderr 捕获与 `exit code N without RESULT; stderr tail` 上报（controller 参数硬失败可观测）;**真发现=nativePreflight 的 pf.Command 是硬编码模板**（probes-only 任务显示幻影 `--skill ""`,且不显示 backend/device/on_terminal/duration——操作者看到的是 executeNative 永远不会执行的命令）;
+- 附带发现:buildNativeSession 内嵌 MkdirAll 副作用,测试在包 CWD 留下 stray native/ 目录。
+
+**Discovery Pass #2**（00:15 前后,monitor 敌意复审）:
+- SetNotify 无锁写 notify 字段——真实接线（cmd/server main.go:113-114）恒先 Set 后 Start,无实际竞态,记为 P3 潜在契约问题不展开;
+- 采样失败路径 `continue` 无状态变化:**真发现=采样器持续失败时 overload 闩锁永久冻结**——若采样死时闩锁保持,pause 门无限期关死且 API 无任何字段解释原因;告警每 interval 一条（3s 级日志刷屏）;
+- bus.Notify 每 3s 一发:订阅者通道缓冲 1 且满即弃,合并语义无风暴,by design。
+
+**Discovery Pass #3**（00:40 前后,runner/kill 与 API auth/SSE 与 store open/migrate 轮审）:runner（taskkill /T+PPID 扫+Job Object）、kill_windows 注释级边界处理、api（ConstantTimeCompare、无 token 拒写方法 CSRF 硬化、screenshot 路径穿越守卫、streamHub 合并+shutdown 释放）、store（WAL+busy_timeout+幂等迁移+部分唯一索引去重）——**零 P0/P1,全部既往硬化到位**。附:task service 取消归因在 service 层先查 ctx.Err()==Canceled,runner 的 DeadlineExceeded 语义误报在下游已纠正,非缺陷。
+
+**Discovery Pass #4**（00:45 前后,会话循环终态语义复审）:skill.rs failed 只能经超时无 fallback 一次性闩锁,done 后只重复 Done（Failed-after-done 不可达）;**真发现（P3）=终态后 `skill: DONE/FAILED` stderr 每周期重复打印**——协议 EVENT 已被 D1 门控（M13）,人读通道没门控,30min soak ≈5400 行重复。修法=同一首次门控,协议语义不变。
+
+| M | 内容 | Verdict | Commit | 验收证据 |
+|---|------|---------|--------|----------|
+| M0 | **上夜遗留收口**:dangling 取值旗标校验从 `--on-terminal` 单项推广到全部 17 个取值旗标（`--skill` 悬空静默丢技能/`--emergency-after` 悬空解除急停/`--model-path` 悬空降级 Mock——全部改为响亮报错）;VALUE_FLAGS 提为模块级常量,新测试迭代 parse 强制的同一清单（防新增旗标忘挂守卫） | PASS | f27793b | 新测试 17 旗标逐一断言悬空报错;bin 16 绿;clippy/fmt 0;LOCAL CI PASS |
+| M1 | **nativePreflight 命令预览对齐真实调用**:pf.Command 改用 buildNativeSession 自身输出（buildNativeSession 保持纯函数——MkdirAll 移入 executeNative,顺带修掉测试在包 CWD 留 stray native/ 目录的疣）;新测试钉 probes-only 预览无幻影 --skill 且含 --probes/--on-terminal stop/--backend gdi/--dry-run/--protocol,preflight 不创建会话日志目录 | PASS | f15b136 | task 包 11.5s 全绿;gofmt/vet/build 0;LOCAL CI PASS |
+| M2 | **过夜调度链 soak 轮换**（证据轮,ROADMAP 夜班主线）:soak-server/ctl 重建自当前代码,505min（23:53→~08:20）,随机 token+临时目录+无害假任务,与开发并行低资源 | RUNNING | (后台) | server 18711 healthy,plan armed;到期断言 zero failed/stuck+总数容差 |
+| M3 | **monitor stale fail-safe 可观测化**:连续 3 次采样失败→snapshot 标 stale+last_error（API 新增两字段）,告警限频（首条+每分钟一条）;**fail-safe 语义=闩锁不因失去数据而自动释放**（不可测的机器不放行新定时任务）,好样本治愈 stale 回正常迟滞;dashboard 资源面板加「⟳ 数据过期」徽章+横幅（解释闩锁保持）;定向 -race 干净 | PASS | ec78f9c | 新测试 2（stale 标记/fail-safe/治愈+限频断言）;monitor 8 测试全绿;api/task/monitor 定向绿;LOCAL CI PASS;node --check JS 守卫过 |
+| M4 | **文档同步**:README（zh/en）资源监控节补 stale 语义与 fail-safe 契约;native-quickstart 故障排查表补「`--flag requires a value`」条目（对应 M0 新报错的操作者条目） | PASS | e117acf | 纯文档;与 ec78f9c/f27793b 行为一致 |
+| M5 | **会话循环终态 stderr 门控（D1 对齐）**:`skill: DONE/FAILED` 从每周期重复改为首次门控（协议 EVENT 早已门控,人读通道补齐）;Failed-after-done 不可达→无观测路径丢失输出 | PASS | b436cc3 | cargo test 全量 163 绿（lib 133+bin 16+集成 14）;clippy 0 |
+
 ### Night 2026-09-15 → 2026-09-16（夜班 agent 记录）
 
 Handoff 验证 23:39 通过（night=2026-09-15,project=game-scheduler,repo=D:/codes/game-scheduler,git_head=6457e00=本地 HEAD,dispatch_at=23:38,window 23:00-08:40/09:00;prompt SHA-256 前缀 5fbf6d6b07794978 实测吻合）。prompt 含 1 字节截断（`根因二` 的「二」缺第三字节,UTF-8 解码失败——与 09-13 夜同类 Prompt Factory 编码问题）,清洗后完整执行（清洗稿存 .nightly/overnight-prompt-tonight-clean.md,不入库）。控制面 artifact 不存在=维持 RUN。基线 LOCAL CI PASS（exit 0:.nightly/ci-baseline-tonight-0915.log,Go 22 包 + cargo + govulncheck/gosec/secret/staticcheck 全绿）。
