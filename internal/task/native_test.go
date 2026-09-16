@@ -151,6 +151,36 @@ func TestNativeTaskPreflightChecksDeclaredFiles(t *testing.T) {
 	}
 }
 
+func TestNativeTaskPreflightCommandMirrorsRealInvocation(t *testing.T) {
+	fake := buildFakeController(t)
+	dir := t.TempDir()
+	probes := filepath.Join(dir, "probes.json")
+	_ = os.WriteFile(probes, []byte(`{}`), 0o644)
+	svc, st := newNativeSvc(t, config.Config{MaxConcurrent: 1, DataDir: dir,
+		NativeControllerPath: fake})
+	// probes-only params: a hardcoded preview used to render a phantom
+	// --skill "" and hide backend/on_terminal entirely.
+	tk := nativeTask(t, st, fmt.Sprintf(`{"executor":"native","probes":%q,"on_terminal":"stop","backend":"gdi"}`, probes))
+
+	pf, err := svc.Preflight(tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(pf.Command, "--skill") {
+		t.Fatalf("probes-only preview must not show a phantom --skill: %q", pf.Command)
+	}
+	for _, want := range []string{"--probes", "--on-terminal", "stop", "--backend", "gdi", "--dry-run", "--protocol"} {
+		if !strings.Contains(pf.Command, want) {
+			t.Fatalf("preview must mirror the real invocation, missing %q: %q", want, pf.Command)
+		}
+	}
+	// Preview building must stay side-effect-free: the session-log dir is
+	// created by executeNative, never by a preflight.
+	if _, err := os.Stat(filepath.Join(dir, "native")); !os.IsNotExist(err) {
+		t.Fatalf("preflight must not create the session-log dir: %v", err)
+	}
+}
+
 // ---- auto executor (NC6): resolve native vs external per execution ---------
 
 // autoTask is nativeTask with an explicit task type: auto tasks may keep an

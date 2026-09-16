@@ -151,9 +151,10 @@ func buildNativeSession(cfg config.Config, execID int64, t store.Task, p nativeP
 		args = append(args, "--allow-input")
 	}
 	// Session TSV lands with the other execution logs; the controller
-	// creates the file, we create the directory.
+	// creates the file. (Directory creation stays with executeNative —
+	// building the invocation stays side-effect-free so Preflight can
+	// preview it without touching the filesystem.)
 	logDir := filepath.Join(cfg.DataDir, "native")
-	_ = os.MkdirAll(logDir, 0o755)
 	args = append(args, "--session-log", filepath.Join(logDir, fmt.Sprintf("exec-%d.tsv", execID)))
 
 	return native.SessionConfig{
@@ -179,6 +180,9 @@ func (s *Service) executeNative(ctx context.Context, exec store.Execution, execI
 	if err != nil {
 		return s.finishWithError(exec, err)
 	}
+	// The controller creates the session-log file; we create the directory.
+	// Kept here (not in buildNativeSession) so Preflight stays side-effect-free.
+	_ = os.MkdirAll(filepath.Join(s.cfg.DataDir, "native"), 0o755)
 
 	exec.Command = session.CommandLine()
 	exec.Status = store.StatusRunning
@@ -287,8 +291,14 @@ func (s *Service) nativePreflight(t store.Task) (Preflight, error) {
 	if err := validateNativeParams(s.cfg, t, p); err != nil {
 		pf.ValidationError = err.Error()
 	}
-	pf.Command = fmt.Sprintf("%s --dry-run --window %s --skill %s",
-		s.cfg.NativeControllerPath, p.Window, p.Skill)
+	// The preview must mirror what executeNative would actually spawn —
+	// rendering a fixed "--skill ..." line showed a phantom --skill "" on
+	// probes-only tasks and hid the real flags (backend/device/on_terminal/
+	// duration). buildNativeSession is cheap and side-effect-free, so the
+	// honest preview is just its command line.
+	if session, serr := buildNativeSession(s.cfg, 0, t, p); serr == nil {
+		pf.Command = session.CommandLine()
+	}
 	pf.Executable = s.cfg.NativeControllerPath
 	pf.ExecutableExists = executableExists(s.cfg.NativeControllerPath)
 	pf.addExecutableCheck("native_controller", s.cfg.NativeControllerPath)
