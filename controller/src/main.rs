@@ -188,6 +188,33 @@ struct DryRunOptions {
     protocol: bool,
 }
 
+/// Every value-taking flag of the dry-run CLI. A present-but-valueless
+/// occurrence must fail loudly: `opt()` maps "absent" and "dangling" to
+/// None alike, so a trailing typo like `--skill` would otherwise silently
+/// DROP the skill (`--emergency-after` would silently disarm the timer,
+/// `--model-path` silently degrade to Mock). Kept at module level so the
+/// dangling-flag test iterates the exact same list `parse` enforces.
+/// (--resize-after takes two values and validates itself below.)
+const VALUE_FLAGS: [&str; 17] = [
+    "--window",
+    "--backend",
+    "--fps",
+    "--model",
+    "--min-confidence",
+    "--duration",
+    "--debug-dir",
+    "--session-log",
+    "--emergency-after",
+    "--model-path",
+    "--record",
+    "--record-max",
+    "--replay",
+    "--probes",
+    "--skill",
+    "--infer-timeout",
+    "--device",
+];
+
 impl DryRunOptions {
     fn parse(args: &[String]) -> Result<DryRunOptions, String> {
         fn opt(args: &[String], name: &str) -> Option<String> {
@@ -195,6 +222,11 @@ impl DryRunOptions {
                 .position(|a| a == name)
                 .and_then(|i| args.get(i + 1))
                 .cloned()
+        }
+        for name in VALUE_FLAGS {
+            if args.iter().any(|a| a == name) && opt(args, name).is_none() {
+                return Err(format!("{name} requires a value"));
+            }
         }
         let window = opt(args, "--window").unwrap_or_else(|| "@probe".into());
         if window.trim().is_empty() {
@@ -1930,6 +1962,20 @@ mod tests {
         // fast-fail the operator explicitly requested.
         let e = DryRunOptions::parse(&args(&["--dry-run", "--on-terminal"])).unwrap_err();
         assert!(e.contains("continue|stop"), "{e}");
+    }
+
+    #[test]
+    fn every_value_flag_rejects_a_dangling_occurrence() {
+        // parse()'s opt() cannot tell "flag absent" from "flag present with
+        // no value", so each VALUE_FLAGS entry gets an explicit guard. This
+        // test iterates the same module-level list parse enforces, so a new
+        // value-taking flag that forgets its guard fails here instead of
+        // shipping a silent-drop footgun.
+        for name in VALUE_FLAGS {
+            let e = DryRunOptions::parse(&args(&["--dry-run", name]))
+                .expect_err("dangling flag must error");
+            assert_eq!(e, format!("{name} requires a value"), "{name}");
+        }
     }
 
     #[test]
