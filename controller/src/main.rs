@@ -935,8 +935,12 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                     }
                 }
                 controller::skill::StepOutcome::Done => {
-                    eprintln!("skill: DONE");
+                    // D1 alignment: the terminal outcome prints (and emits)
+                    // ONCE; the engine repeats Done every cycle afterwards
+                    // and an un-gated line would spam stderr for the rest
+                    // of the session.
                     if !skill_terminal_emitted {
+                        eprintln!("skill: DONE");
                         // Only reachable when the START state itself was
                         // terminal (no transition ever announced it) — name
                         // the real state instead of a hardcoded alias.
@@ -951,8 +955,10 @@ fn run_dry_run(opts: &DryRunOptions) -> i32 {
                     }
                 }
                 controller::skill::StepOutcome::Failed => {
-                    eprintln!("skill: FAILED");
+                    // Same D1 gate as Done: first Failed tells the operator
+                    // (stderr) and the protocol stream; repeats are silence.
                     if !skill_terminal_emitted {
+                        eprintln!("skill: FAILED");
                         proto.event(
                             cycle,
                             "failed",
