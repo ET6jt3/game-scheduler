@@ -541,6 +541,7 @@ Get-Content backup_request.json | ctl -server $S -data - planner import
 - **过载策略** `overload_policy`:
   - `alert`(默认):只在看板**红色横幅提醒**(`⚠ 资源过载:…`),不干预任务。
   - `pause`:在此基础上,**过载期间跳过新的定时任务**(调度器记日志并在看板标注「已暂停定时任务」),手动触发不受影响;资源回落后自动恢复。
+- **采样持续失败时(stale)**:连续 3 次采样失败后,看板资源面板显示「⟳ 数据过期」并给出最后错误;显示值冻结在**最后一次成功采样**。语义是 fail-safe——若采样死亡时过载闩锁正保持着,它**不会**因失去数据而自动释放(pause 门在恢复采样前不放行新定时任务);任何一次成功采样都会清除过期标记并回到正常迟滞路径。
 - 纯只读观测 + 调度闸门,**不碰游戏或工具**;只看 CPU/内存(`gopsutil`),不读进程内存。
 - 相关配置:`monitor_enabled`、`cpu_threshold`、`mem_threshold`、`monitor_interval_sec`、`overload_policy`(对应环境变量 `GS_MONITOR_ENABLED`、`GS_CPU_THRESHOLD`、`GS_MEM_THRESHOLD`、`GS_MONITOR_INTERVAL_SEC`、`GS_OVERLOAD_POLICY`)。实时数据也在 `GET /api/dashboard` 的 `resource` 字段中。
 

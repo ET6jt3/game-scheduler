@@ -139,3 +139,4 @@ auto 只降级不升级:它永远不会替你打开真实输入,双闸照旧。
 | RESULT stopped(reason=session exceeded) | governor 会话时长到达,属正常业务终态 |
 | `learn_route: frame frame_NNNNN.png is unreadable` | 该帧损坏(多为被打断的录像留下的截断尾帧):删除或重捕该帧后 `--resume`——已完成帧保留在 checkpoint 里 |
 | `learn_route: checkpoint ... not valid JSON / missing field(s)` | checkpoint 残缺(运行被杀或文件被改动):删除该 checkpoint 重跑,或恢复好的副本 |
+| `--flag requires a value`（任意取值旗标,如 `--skill` / `--model-path` / `--emergency-after`） | 旗标带上了但**没带值**——多为尾部多打了一个旗标名或值丢了。controller 现在硬报错而不是静默忽略:静默丢 `--skill` 会变成纯观察,静默丢 `--emergency-after` 会解除急停计时——两者都比报错危险得多 |

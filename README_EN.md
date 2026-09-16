@@ -406,7 +406,11 @@ It shows:
   `cpu_threshold` / `mem_threshold` (default 90%) for two consecutive samples it
   trips an **overload** banner. With `overload_policy: pause`, scheduled runs are
   held back while overloaded (manual runs still work); `alert` (default) only
-  surfaces the banner. Read-only observability + a scheduling gate — it only
+  surfaces the banner. When sampling keeps failing (3 consecutive errors) the
+  panel shows a **stale** badge with the last error, values freeze at the last
+  good sample, and the overload latch deliberately stays held — the pause gate
+  does not release on absent data until a good sample heals it. Read-only
+  observability + a scheduling gate — it only
   reads CPU/memory, never game/tool internals. Exposed at `/api/dashboard`'s
   `resource` field; env vars `GS_MONITOR_ENABLED`, `GS_CPU_THRESHOLD`,
   `GS_MEM_THRESHOLD`, `GS_MONITOR_INTERVAL_SEC`, `GS_OVERLOAD_POLICY`.
