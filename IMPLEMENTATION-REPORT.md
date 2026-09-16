@@ -17,7 +17,7 @@ Implemented:
 
 Preserved execution architecture: bounded shared execution slots, scheduled overlap suppression, manual queueing, retries, timeout, cancellation, Windows process-tree cleanup, stale execution reconciliation, execution history, failure screenshots, SSE, auth and native controller dispatch. The changes do not introduce a second runner or increase default concurrency.
 
-Verification: see TEST-REPORT.md. Compilation alone is not represented as runtime verification. The browser interaction attempt was interrupted; UI interaction/visual acceptance remains unverified. Windows runtime acceptance is delegated to the included GitHub Actions workflow and must be checked separately.
+Verification: see TEST-REPORT.md. Compilation alone is not represented as runtime verification. Windows runtime/package acceptance passed on GitHub Actions (run 35158410555), including relocation and launcher scripts. The browser blocked access to the local test server; UI interaction/visual acceptance remains unverified.
 
 Explicit limitations:
 
@@ -25,5 +25,6 @@ Explicit limitations:
 - Managed mode registers a managed path. It does not download, install or copy helper files.
 - Native controller and Python/helper environments are not bundled or modified. The package includes server and ctl, and supports an explicitly supplied compatible controller at build time.
 - Windows smoke covers relocation across directories with spaces/Unicode; cross-drive relocation and real interactive game operation still require operator verification. No actual game was launched.
+- Instance config_dir/data_dir are persisted and preflight-checked; the helper itself must already be configured to use them. No unsupported helper CLI flags are synthesized.
 
 NTE CLI source verified from `BnanZ0/ok-nte/docs/en/guides/quick-start.md`: task selection uses `-t` and exit-after-task uses `-e`. Numeric task meanings are not hard-coded.
