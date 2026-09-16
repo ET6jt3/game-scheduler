@@ -6,6 +6,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -166,8 +167,10 @@ func Load(path string) (Config, error) {
 		}
 	}
 	if v := os.Getenv("GS_OVERLOAD_POLICY"); v != "" {
-		if v == "alert" || v == "pause" {
-			cfg.OverloadPolicy = v
+		// explicit membership check: normalizePolicy returns unknown input
+		// unchanged, so non-empty does not mean valid
+		if n := normalizePolicy(v); n == "alert" || n == "pause" {
+			cfg.OverloadPolicy = n
 		} else {
 			slog.Warn("ignoring invalid env override", "var", "GS_OVERLOAD_POLICY", "value", v, "want", "alert|pause")
 		}
@@ -191,7 +194,37 @@ func Load(path string) (Config, error) {
 	if strings.TrimSpace(cfg.DBPath) == "" {
 		cfg.DBPath = filepath.Join(cfg.DataDir, "scheduler.db")
 	}
+	// The env branch rejects an unknown policy with a warning, but the config
+	// FILE path had no validation at all: a typo like "Pause" or " pause "
+	// silently degraded the pause gate to alert-only — the operator believes
+	// scheduled runs are protected while they are not. Fail the startup
+	// instead; that is the loud, fixable failure mode.
+	cfg.OverloadPolicy = normalizePolicy(cfg.OverloadPolicy)
+	switch cfg.OverloadPolicy {
+	case "", "alert", "pause": // "" keeps monitor.New's alert default
+	default:
+		return cfg, fmt.Errorf("config overload_policy must be alert|pause, got %q", cfg.OverloadPolicy)
+	}
+	// A trailing newline in an env var (setx on Windows appends one) would
+	// otherwise make every Bearer comparison fail with inscrutable 401s.
+	cfg.AuthToken = strings.TrimSpace(cfg.AuthToken)
 	return cfg, nil
+}
+
+// normalizePolicy trims and lowercases an overload policy; empty input maps
+// to "". Values outside alert|pause (after normalization) stay unrecognized
+// so callers can reject them.
+func normalizePolicy(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "alert":
+		return "alert"
+	case "pause":
+		return "pause"
+	case "":
+		return ""
+	default:
+		return v
+	}
 }
 
 // EnsureDirs creates the data directory and screenshot subdirectory.
