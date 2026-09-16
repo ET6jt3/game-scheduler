@@ -28,6 +28,12 @@ pub struct CachingDetector<D: Detector> {
     last_error: Option<String>,
     cycles: u64,
     refresh_every: u64,
+    /// Set once the inner detector has failed until its next success:
+    /// shortcut and cache hits are bypassed while set, so a recurring
+    /// identical frame keeps calling the inner detector (feeding the
+    /// session's consecutive-failure breaker) instead of replaying the
+    /// pre-failure detections forever.
+    inner_failing: bool,
     pub hits: u64,
     pub misses: u64,
 }
@@ -49,6 +55,7 @@ impl<D: Detector> CachingDetector<D> {
             last_error: None,
             cycles: 0,
             refresh_every,
+            inner_failing: false,
             hits: 0,
             misses: 0,
         }
@@ -70,8 +77,12 @@ impl<D: Detector> Detector for CachingDetector<D> {
     fn detect(&mut self, frame: &Frame) -> Vec<Detection> {
         self.cycles += 1;
         let key = Self::key(frame);
-        let forced = self.refresh_every > 0 && self.cycles.is_multiple_of(self.refresh_every);
-        let same_as_last = self.last_key == Some(key);
+        // While the inner detector is latched failing, behave as if every
+        // cycle forced a refresh: shortcut hits here would replay the last
+        // good detections and the failure would never resurface.
+        let forced = self.inner_failing
+            || (self.refresh_every > 0 && self.cycles.is_multiple_of(self.refresh_every));
+        let same_as_last = !self.inner_failing && self.last_key == Some(key);
         if !forced && same_as_last {
             self.hits += 1;
             return self.last_detections.clone();
@@ -89,9 +100,17 @@ impl<D: Detector> Detector for CachingDetector<D> {
         let dets = self.inner.detect(frame);
         if let Some(e) = self.inner.take_error() {
             self.last_error = Some(e);
-            // do not cache failures: the next cycle retries inference
+            // Latch the failure and invalidate BOTH reuse paths: last_key
+            // still pointed at the previous success for this identical
+            // frame, and the cache entry predates the failure — either
+            // would replay stale detections without ever calling the inner
+            // detector again.
+            self.inner_failing = true;
+            self.last_key = None;
+            self.cache.remove(&key);
             return Vec::new();
         }
+        self.inner_failing = false;
         if self.cache.len() >= 64 {
             self.cache.clear(); // bounded: old scenes fall out wholesale
         }
@@ -182,6 +201,65 @@ mod tests {
         det.detect(&f);
         det.detect(&f);
         assert_eq!(det.inference_count(), 2, "refresh on cycle 3");
+    }
+
+    /// Succeeds once, then fails on every call: models a wedged inference
+    /// backend (error latched, no detections).
+    struct FailsAfterFirst {
+        calls: Cell<u32>,
+    }
+
+    impl Detector for FailsAfterFirst {
+        fn detect(&mut self, _frame: &Frame) -> Vec<Detection> {
+            let n = self.calls.get() + 1;
+            self.calls.set(n);
+            if n == 1 {
+                return vec![Detection {
+                    label: "x".into(),
+                    rect: crate::transform::Rect::new(0.0, 0.0, 1.0, 1.0),
+                    confidence: 1.0,
+                }];
+            }
+            Vec::new()
+        }
+
+        fn take_error(&mut self) -> Option<String> {
+            if self.calls.get() > 1 {
+                Some("inference broken".into())
+            } else {
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn failed_inference_same_frame_retries_inner_instead_of_stale_hit() {
+        // refresh_every=2: cycle 2 forces the refresh that DISCOVERS the
+        // failure (a shortcut hit cannot discover anything — that is the
+        // whole point of the inner_failing latch being tested here).
+        let mut det = CachingDetector::new(
+            FailsAfterFirst {
+                calls: Cell::new(0),
+            },
+            2,
+        );
+        let f = frame(5);
+        // cycle 1: success (cached, last_key set)
+        assert_eq!(det.detect(&f).len(), 1);
+        // cycle 2 (forced): inner fails — empty result, error surfaced
+        assert!(det.detect(&f).is_empty(), "a failing cycle must not replay");
+        assert!(det.take_error().unwrap().contains("broken"));
+        // cycle 3, SAME frame: the failure latch must bypass the shortcut so
+        // the inner detector runs again and the session's consecutive-failure
+        // breaker keeps being fed. Without the latch this cycle replayed the
+        // pre-failure detections forever (misses frozen at 2, breaker starved).
+        assert!(det.detect(&f).is_empty());
+        assert_eq!(
+            det.inference_count(),
+            3,
+            "same frame while failing must re-run inference"
+        );
+        assert!(det.take_error().unwrap().contains("broken"));
     }
 
     #[test]
