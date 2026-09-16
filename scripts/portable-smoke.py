@@ -45,7 +45,11 @@ def main():
             raise AssertionError('health timeout')
         def stop():
             nonlocal process,log
-            if health():api('/api/server/stop','POST',{})
+            if health():
+                if os.name=='nt':
+                    result=subprocess.run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(package/'App'/'Portable.ps1'),'-Action','Stop'],stdout=log,stderr=log,timeout=30)
+                    assert result.returncode==0,(package/'Logs'/'smoke.log').read_text(errors='replace')
+                else:api('/api/server/stop','POST',{})
             if process is not None:
                 process.wait(timeout=20);assert process.returncode==0
             for _ in range(100):
@@ -103,7 +107,9 @@ def main():
             check(len(api('/api/helpers'))==2,'instance persistence after restart')
             check(api('/api/helper-settings/discovery')['roots']==[str(external)],'discovery persistence')
             check(preflight('external')['executable']==str(fixture),'external path unchanged after relocation')
-            check(preflight('managed')['executable']==str(package/'Helpers'/managed.name),'managed path relocated')
+            managed_pf=preflight('managed')
+            expected_managed=package/'Helpers'/managed.name
+            check(managed_pf['ready'] and os.path.samefile(managed_pf['executable'],expected_managed),'managed path relocated (same file in moved folder)')
             for task in tasks.values():run_task(task)
             api('/api/helpers/external','DELETE')
             check(preflight('managed')['ready'] and fixture.exists(),'deleting registration preserves other instance and external files')
