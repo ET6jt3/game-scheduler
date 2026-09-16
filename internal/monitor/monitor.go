@@ -53,6 +53,13 @@ type Snapshot struct {
 	Reason       string    `json:"reason,omitempty"`
 	Policy       string    `json:"policy"`
 	SampledAt    time.Time `json:"sampled_at"`
+	// Stale is set after staleAfterFailures consecutive failed samples: the
+	// values shown are the LAST GOOD sample, not live data. The overload
+	// latch never clears on stale data — if it was held when sampling died
+	// it stays held (fail-safe for the pause gate) until a good sample
+	// arrives; LastError says why sampling is failing.
+	Stale     bool   `json:"stale"`
+	LastError string `json:"last_error,omitempty"`
 	// Rolling history (oldest→newest) for sparklines; disk is informational.
 	CPUHistory  []float64 `json:"cpu_history"`
 	MemHistory  []float64 `json:"mem_history"`
@@ -79,6 +86,15 @@ type Config struct {
 // declaring overload, to avoid flapping on momentary spikes.
 const breachesToTrip = 2
 
+// staleAfterFailures: this many consecutive failed samples mark the snapshot
+// stale. Below that, a transient sampler hiccup just skips a beat.
+const staleAfterFailures = 3
+
+// staleWarnInterval rate-limits the sampler-failure warning while the failure
+// persists: a dead sampler must degrade to one line per minute, not one per
+// sampling interval.
+const staleWarnInterval = time.Minute
+
 // Monitor samples resources and exposes the current snapshot.
 type Monitor struct {
 	cfg     Config
@@ -88,12 +104,14 @@ type Monitor struct {
 
 	notify func(event, title, message string) // optional operator alert hook
 
-	mu       sync.RWMutex
-	snap     Snapshot
-	breach   int
-	cpuHist  []float64
-	memHist  []float64
-	diskHist []float64
+	mu          sync.RWMutex
+	snap        Snapshot
+	breach      int
+	failStreak  int
+	lastFailLog time.Time
+	cpuHist     []float64
+	memHist     []float64
+	diskHist    []float64
 }
 
 // SetNotify installs an operator-alert hook, called when overload trips.
@@ -149,7 +167,7 @@ func (m *Monitor) loop(ctx context.Context) {
 		case <-t.C:
 			r, err := m.sampler()
 			if err != nil {
-				m.log.Warn("resource sample failed", "err", err)
+				m.recordError(err, time.Now())
 				continue
 			}
 			m.update(r)
@@ -157,7 +175,38 @@ func (m *Monitor) loop(ctx context.Context) {
 	}
 }
 
+// recordError handles a failed sample. After staleAfterFailures consecutive
+// failures the snapshot is marked stale: the dashboard keeps seeing the last
+// good values, but SampledAt freezes and Stale/LastError say why. The
+// overload latch is intentionally NOT cleared (fail-safe: an unknown machine
+// must not invite new load via the pause gate releasing). The warning log is
+// rate-limited so a dead sampler degrades to one line per minute.
+func (m *Monitor) recordError(err error, now time.Time) {
+	m.mu.Lock()
+	m.failStreak++
+	streak := m.failStreak
+	if streak >= staleAfterFailures {
+		m.snap.Stale = true
+		m.snap.LastError = err.Error()
+	}
+	logNow := streak == 1 || now.Sub(m.lastFailLog) >= staleWarnInterval
+	if logNow {
+		m.lastFailLog = now
+	}
+	m.mu.Unlock()
+
+	if logNow {
+		m.log.Warn("resource sample failed", "err", err, "streak", streak)
+	}
+	if streak == staleAfterFailures {
+		// transition into staleness: SSE listeners should re-render so the
+		// stale marker actually shows up without waiting for the next tick
+		m.bus.Notify()
+	}
+}
+
 // update records a reading and recomputes the overload state with hysteresis.
+// A good sample always heals staleness: it is proof the sampler works again.
 func (m *Monitor) update(r Reading) {
 	overCPU := m.cfg.CPUThreshold > 0 && r.CPUPercent >= m.cfg.CPUThreshold
 	overMem := m.cfg.MemThreshold > 0 && r.MemPercent >= m.cfg.MemThreshold
@@ -174,6 +223,9 @@ func (m *Monitor) update(r Reading) {
 	}
 
 	m.mu.Lock()
+	m.failStreak = 0
+	m.snap.Stale = false
+	m.snap.LastError = ""
 	if over {
 		m.breach++
 	} else {

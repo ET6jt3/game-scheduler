@@ -1,7 +1,11 @@
 package monitor
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/xiabee/game-scheduler/internal/events"
 )
@@ -10,6 +14,74 @@ func newMon(policy string) *Monitor {
 	return New(Config{
 		Enabled: true, CPUThreshold: 90, MemThreshold: 90, Policy: policy,
 	}, func() (Reading, error) { return Reading{}, nil }, events.New(), nil)
+}
+
+func TestStaleMarkingIsFailSafeAndHeals(t *testing.T) {
+	m := newMon(PolicyPause)
+
+	// Precondition: overload latched (pause gate closed).
+	m.update(Reading{CPUPercent: 99, MemPercent: 10})
+	m.update(Reading{CPUPercent: 99, MemPercent: 10})
+	if !m.ShouldPause() {
+		t.Fatal("precondition: pause gate must be closed while overloaded")
+	}
+
+	// Sampler starts failing. Below the threshold the snapshot stays live.
+	for i := 1; i < staleAfterFailures; i++ {
+		m.recordError(errors.New("wmi dead"), time.Now())
+	}
+	if m.Current().Stale {
+		t.Fatal("a transient hiccup must not mark the snapshot stale")
+	}
+
+	// At the threshold: stale marker on, error surfaced, and — fail-safe —
+	// the overload latch STAYS held: an unmeasurable machine must not invite
+	// new load by silently releasing the pause gate.
+	m.recordError(errors.New("wmi dead"), time.Now())
+	s := m.Current()
+	if !s.Stale || s.LastError == "" {
+		t.Fatalf("snapshot must be marked stale with the last error: %+v", s)
+	}
+	if !m.ShouldPause() {
+		t.Fatal("fail-safe: stale data must not release the pause gate")
+	}
+
+	// A good sample heals staleness (and the under-threshold reading clears
+	// the overload latch through the normal hysteresis path).
+	m.update(Reading{CPUPercent: 10, MemPercent: 10})
+	s = m.Current()
+	if s.Stale || s.LastError != "" {
+		t.Fatalf("a good sample must clear staleness: %+v", s)
+	}
+	if m.Overloaded() || m.ShouldPause() {
+		t.Fatal("recovered sampler + normal load must release the pause gate")
+	}
+}
+
+func TestStaleWarnLogIsRateLimited(t *testing.T) {
+	m := newMon(PolicyAlert)
+	var buf bytes.Buffer
+	m.log = slog.New(slog.NewTextHandler(&buf, nil))
+
+	err := errors.New("sampler gone")
+	m.recordError(err, time.Now())
+	if buf.Len() == 0 {
+		t.Fatal("the first failure must log")
+	}
+
+	// Failures inside the rate-limit window are silent.
+	buf.Reset()
+	m.recordError(err, time.Now().Add(5*time.Second))
+	m.recordError(err, time.Now().Add(30*time.Second))
+	if buf.Len() != 0 {
+		t.Fatalf("warnings inside the window must be suppressed: %s", buf.String())
+	}
+
+	// Past the window it warns again (one line per minute, not per interval).
+	m.recordError(err, time.Now().Add(2*time.Minute))
+	if buf.Len() == 0 {
+		t.Fatal("a persisting failure must warn again after the window")
+	}
 }
 
 func TestOverloadHysteresis(t *testing.T) {

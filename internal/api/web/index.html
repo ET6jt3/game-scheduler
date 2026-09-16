@@ -294,10 +294,15 @@ function renderResource(r){
   const gb=mb=>(mb/1024).toFixed(1);
   const memSub = r.mem_total_mb ? `${gb(r.mem_used_mb)} / ${gb(r.mem_total_mb)} GB` : `阈值 ${r.mem_threshold}%`;
   const diskSub = r.disk_total_mb ? `${gb(r.disk_used_mb)} / ${gb(r.disk_total_mb)} GB` : '—';
-  const status = r.overloaded ? `<span class="status over">⚠ 过载</span>` : `<span class="status ok">● 正常</span>`;
-  const banner = r.overloaded
+  // stale = sampler failing for a while: values shown are the last good
+  // sample; the overload latch (and pause gate) deliberately stays held.
+  const stale = !!r.stale;
+  const status = stale ? `<span class="status over">⟳ 数据过期</span>`
+    : r.overloaded ? `<span class="status over">⚠ 过载</span>` : `<span class="status ok">● 正常</span>`;
+  let banner = r.overloaded
     ? `<div class="banner">⚠ 资源过载：${esc(r.reason)}${r.policy==='pause'?'（已暂停定时任务）':''}</div>` : "";
-  el.innerHTML = `<div class="res ${r.overloaded?'over':''}">
+  if(stale) banner += `<div class="banner">⟳ 资源采样失败：${esc(r.last_error||'未知原因')}（显示最后成功采样，${r.overloaded&&r.policy==='pause'?'过载暂停保持，恢复采样前定时任务不会放行':'过载状态冻结'}）</div>`;
+  el.innerHTML = `<div class="res ${(r.overloaded||stale)?'over':''}">
     <div class="rh">
       <span class="t">资源监控</span>${status}
       <span class="meta">阈值 CPU ${r.cpu_threshold}% / 内存 ${r.mem_threshold}% · 策略 ${r.policy==='pause'?'过载暂停':'仅提醒'} · 近 ${(r.cpu_history||[]).length} 次采样</span>
