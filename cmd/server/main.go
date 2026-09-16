@@ -21,9 +21,11 @@ import (
 	"github.com/xiabee/game-scheduler/internal/game/hsr"
 	"github.com/xiabee/game-scheduler/internal/game/r1999"
 	"github.com/xiabee/game-scheduler/internal/game/wuwa"
+	"github.com/xiabee/game-scheduler/internal/helper"
 	"github.com/xiabee/game-scheduler/internal/monitor"
 	"github.com/xiabee/game-scheduler/internal/notify"
 	"github.com/xiabee/game-scheduler/internal/scheduler"
+	"github.com/xiabee/game-scheduler/internal/singleinstance"
 	"github.com/xiabee/game-scheduler/internal/store"
 	"github.com/xiabee/game-scheduler/internal/task"
 	"github.com/xiabee/game-scheduler/internal/version"
@@ -57,6 +59,10 @@ func run() int {
 	if *addr != "" {
 		cfg.Addr = *addr
 	}
+	if err := cfg.ResolvePortable(); err != nil {
+		log.Error("portable paths", "err", err)
+		return 1
+	}
 	if err := cfg.EnsureDirs(); err != nil {
 		log.Error("ensure dirs", "err", err)
 		return 1
@@ -70,6 +76,12 @@ func run() int {
 		log.Warn("not running as Administrator: tools that control the game (e.g. BetterGI) may fail with exit code 553; relaunch via examples/run-admin.ps1")
 	}
 
+	release, err := singleinstance.Acquire(cfg.DBPath + ".server.lock")
+	if err != nil {
+		log.Error("single instance", "err", err)
+		return 1
+	}
+	defer release()
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
 		log.Error("open store", "err", err)
@@ -89,6 +101,12 @@ func run() int {
 	notifier := notify.New(cfg.NotifyCmd, log)
 	reg := game.NewRegistry(genshin.New(), hsr.New(), wuwa.New(), r1999.New())
 	svc := task.NewService(st, reg, cfg, bus, log)
+	hub, err := helper.New(st, reg, cfg)
+	if err != nil {
+		log.Error("load helpers", "err", err)
+		return 1
+	}
+	svc.Helpers = hub
 	svc.SetNotify(notifier.Send)
 	// Drain in-flight task workers before the deferred st.Close() runs (defers
 	// are LIFO, so registering this after st.Close keeps the order: scheduler
@@ -148,7 +166,14 @@ func run() int {
 		}()
 	}
 
+	stop := make(chan os.Signal, 1)
 	apiSrv := api.New(st, svc, sched, reg, bus, mon, cfg, log)
+	apiSrv.RequestShutdown = func() {
+		select {
+		case stop <- syscall.SIGTERM:
+		default:
+		}
+	}
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           apiSrv.Handler(),
@@ -166,7 +191,6 @@ func run() int {
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	select {
 	case err := <-serverErr:
@@ -180,6 +204,7 @@ func run() int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	svc.Shutdown(ctx)
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error("shutdown", "err", err)
 	}

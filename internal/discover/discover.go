@@ -50,6 +50,7 @@ type Result struct {
 
 // Options tune a scan.
 type Options struct {
+	Tools    []Tool        // optional immutable signature snapshot
 	Paths    []string      // roots to scan; empty => DefaultRoots()
 	MaxDepth int           // directory depth below each root (default 4)
 	Timeout  time.Duration // wall-clock cap (default 30s)
@@ -107,7 +108,11 @@ func Scan(ctx context.Context, opts Options) Result {
 
 	exeMap := map[string][]ref{}
 	dirMap := map[string][]ref{}
-	for _, t := range Tools {
+	signatures := opts.Tools
+	if signatures == nil {
+		signatures = Tools
+	}
+	for _, t := range signatures {
 		for _, e := range t.Exe {
 			exeMap[strings.ToLower(e)] = append(exeMap[strings.ToLower(e)], ref{t.Adapter, t.Name})
 		}

@@ -1,0 +1,19 @@
+{
+  "addr": "127.0.0.1:8080",
+  "data_dir": "${ROOT}/../Data",
+  "db_path": "${DATA}/scheduler.db",
+  "helpers_dir": "${ROOT}/../Helpers",
+  "runtime_dir": "${ROOT}/../Runtime",
+  "manifest_dirs": ["${ROOT}/../Config/helpers", "${DATA}/helpers"],
+  "max_concurrent": 1,
+  "auth_token": "",
+  "monitor_enabled": true,
+  "cpu_threshold": 90,
+  "mem_threshold": 90,
+  "monitor_interval_sec": 3,
+  "overload_policy": "alert",
+  "execution_retention_days": 30,
+  "native_controller_path": "",
+  "native_allow_input": false,
+  "discovery": {"roots": ["${HELPERS}"], "scan_all_local_drives": false, "max_depth": 4}
+}

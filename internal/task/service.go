@@ -26,6 +26,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
+	"github.com/xiabee/game-scheduler/internal/helper"
 	"github.com/xiabee/game-scheduler/internal/runner"
 	"github.com/xiabee/game-scheduler/internal/shellcmd"
 	"github.com/xiabee/game-scheduler/internal/store"
@@ -49,11 +50,12 @@ const waitDelayAfterKill = 2 * time.Second
 
 // Service runs tasks and records executions.
 type Service struct {
-	store *store.Store
-	reg   *game.Registry
-	cfg   config.Config
-	log   *slog.Logger
-	bus   *events.Bus
+	Helpers *helper.Hub
+	store   *store.Store
+	reg     *game.Registry
+	cfg     config.Config
+	log     *slog.Logger
+	bus     *events.Bus
 
 	sem chan struct{} // bounded run slots; cap == cfg.MaxConcurrent
 
@@ -278,21 +280,24 @@ func (s *Service) markCancelledBeforeStart(execID int64) {
 // without launching anything. It is the quickest way to confirm a game is wired
 // up correctly after installing its tool.
 type Preflight struct {
-	TaskID           int64            `json:"task_id"`
-	TaskName         string           `json:"task_name"`
-	GameID           string           `json:"game_id"`
-	Adapter          string           `json:"adapter"`
-	Command          string           `json:"command"`
-	Executable       string           `json:"executable"`
-	ExecutableExists bool             `json:"executable_exists"`
-	WorkingDir       string           `json:"working_dir"`
-	WorkingDirExists bool             `json:"working_dir_exists"`
-	Checks           []PreflightCheck `json:"checks"`
-	Missing          []string         `json:"missing"`
-	ValidationError  string           `json:"validation_error,omitempty"`
-	BuildError       string           `json:"build_error,omitempty"`
-	Resolution       string           `json:"resolution,omitempty"` // auto executor: which branch was picked and why
-	Ready            bool             `json:"ready"`
+	HelperInstance   *store.HelperInstance `json:"helper_instance,omitempty"`
+	Args             []string              `json:"args"`
+	Warnings         []string              `json:"warnings,omitempty"`
+	TaskID           int64                 `json:"task_id"`
+	TaskName         string                `json:"task_name"`
+	GameID           string                `json:"game_id"`
+	Adapter          string                `json:"adapter"`
+	Command          string                `json:"command"`
+	Executable       string                `json:"executable"`
+	ExecutableExists bool                  `json:"executable_exists"`
+	WorkingDir       string                `json:"working_dir"`
+	WorkingDirExists bool                  `json:"working_dir_exists"`
+	Checks           []PreflightCheck      `json:"checks"`
+	Missing          []string              `json:"missing"`
+	ValidationError  string                `json:"validation_error,omitempty"`
+	BuildError       string                `json:"build_error,omitempty"`
+	Resolution       string                `json:"resolution,omitempty"` // auto executor: which branch was picked and why
+	Ready            bool                  `json:"ready"`
 }
 
 // PreflightCheck is one filesystem prerequisite checked before a task is run.
@@ -355,7 +360,19 @@ func (s *Service) externalPreflight(t store.Task) (Preflight, error) {
 	if err != nil {
 		return Preflight{}, err
 	}
-	pf := Preflight{TaskID: t.ID, TaskName: t.Name, GameID: g.ID, Adapter: g.Adapter}
+	return s.preflightExternal(g, t)
+}
+func (s *Service) preflightExternal(g store.Game, t store.Task) (Preflight, error) {
+	var instance *store.HelperInstance
+	var err error
+	if s.Helpers != nil {
+		g, t, instance, err = s.Helpers.Resolve(g, t)
+	}
+	pf := Preflight{TaskID: t.ID, TaskName: t.Name, GameID: g.ID, Adapter: g.Adapter, HelperInstance: instance}
+	if err != nil {
+		pf.ValidationError = err.Error()
+		return pf, nil
+	}
 
 	adapter, err := s.reg.Get(g.Adapter)
 	if err != nil {
@@ -370,6 +387,10 @@ func (s *Service) externalPreflight(t store.Task) (Preflight, error) {
 		pf.BuildError = berr.Error()
 		return pf, nil
 	}
+	return s.checkExternalSpec(pf, g, t, spec), nil
+}
+func (s *Service) checkExternalSpec(pf Preflight, g store.Game, t store.Task, spec runner.Spec) Preflight {
+	pf.Args = append([]string{}, spec.Args...)
 	pf.Command = spec.CommandLine()
 	pf.Executable = spec.Path
 	pf.ExecutableExists = executableExists(spec.Path)
@@ -385,8 +406,11 @@ func (s *Service) externalPreflight(t store.Task) (Preflight, error) {
 	}
 	pf.addExtraConfigDirChecks(g)
 	pf.addPythonEntryChecks(g, t)
+	if s.Helpers != nil {
+		s.addHelperChecks(&pf, g, t, spec)
+	}
 	pf.Ready = pf.ValidationError == "" && pf.BuildError == "" && len(pf.Missing) == 0
-	return pf, nil
+	return pf
 }
 
 func (pf *Preflight) addExecutableCheck(key, path string) {
@@ -453,6 +477,11 @@ func (pf *Preflight) addPythonEntryChecks(g store.Game, t store.Task) {
 		return
 	}
 	dir := strings.TrimSpace(stringValue(ec[dirKey]))
+	if params, e := t.ParamsMap(); e == nil {
+		if override := stringValue(params["working_dir"]); override != "" {
+			dir = override
+		}
+	}
 	entry := strings.TrimSpace(stringValue(ec[entryKey]))
 	if entry == "" {
 		entry = defEntry
@@ -542,6 +571,13 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	if err != nil {
 		return s.finishWithError(exec, fmt.Errorf("load game: %w", err))
 	}
+	var instance *store.HelperInstance
+	if s.Helpers != nil {
+		g, t, instance, err = s.Helpers.Resolve(g, t)
+		if err != nil {
+			return s.finishWithError(exec, err)
+		}
+	}
 	adapter, err := s.reg.Get(g.Adapter)
 	if err != nil {
 		return s.finishWithError(exec, err)
@@ -552,6 +588,17 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	spec, err := adapter.BuildCommand(g, t)
 	if err != nil {
 		return s.finishWithError(exec, fmt.Errorf("build command: %w", err))
+	}
+
+	if s.Helpers != nil {
+		pf := s.checkExternalSpec(Preflight{TaskID: t.ID, TaskName: t.Name, GameID: g.ID, Adapter: g.Adapter, HelperInstance: instance}, g, t, spec)
+		if !pf.Ready {
+			return s.finishWithError(exec, fmt.Errorf("preflight failed: %s %s %v", pf.ValidationError, pf.BuildError, pf.Missing))
+		}
+		diag := map[string]any{"executable": spec.Path, "working_dir": spec.Dir, "args": spec.Args, "helper_instance": instance}
+		if err := s.store.SaveExecutionDiagnostics(execID, diag); err != nil {
+			return s.finishWithError(exec, err)
+		}
 	}
 
 	exec.Command = spec.CommandLine()

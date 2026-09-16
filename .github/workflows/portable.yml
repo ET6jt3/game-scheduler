@@ -1,0 +1,47 @@
+name: Portable Windows acceptance
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-package:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Go acceptance gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if (gofmt -l .) { throw 'gofmt check failed' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'vet failed' }
+          go test ./...
+          if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
+          go build ./cmd/server
+          if ($LASTEXITCODE -ne 0) { throw 'server build failed' }
+          go build ./cmd/ctl
+          if ($LASTEXITCODE -ne 0) { throw 'ctl build failed' }
+      - name: Build portable package and harmless fixture
+        shell: pwsh
+        run: |
+          ./scripts/build-portable.ps1
+          go build -o "$env:RUNNER_TEMP/fake-helper.exe" ./scripts/testdata/fake-helper
+          if ($LASTEXITCODE -ne 0) { throw 'fixture build failed' }
+      - name: Smoke package, relocation, persistence and launchers
+        shell: pwsh
+        run: |
+          python scripts/portable-smoke.py --package dist/GameScheduler-Portable --fixture "$env:RUNNER_TEMP/fake-helper.exe" | Tee-Object -FilePath dist/windows-smoke-report.json
+          if ($LASTEXITCODE -ne 0) { throw 'smoke failed' }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: GameScheduler-Portable-Windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/windows-smoke-report.json
