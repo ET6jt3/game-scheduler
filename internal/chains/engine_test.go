@@ -272,3 +272,83 @@ func TestAtomicStepLinkAndDisabledPlans(t *testing.T) {
 		t.Fatal(string(b))
 	}
 }
+
+
+func TestStartupRecoversPreexistingInterruptedRun(t *testing.T) {
+	_, st, svc, c := setup(t)
+	day := time.Now().UTC().Format("2006-01-02")
+	r, err := st.CreateChainRun(c, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Steps[0].Status = "success"
+	r.Steps[1].Status = "interrupted"
+	r.Steps[1].Error = "interrupted: server stopped"
+	r.Status = "interrupted"
+	if err = st.SaveChainRun(r); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	restarted := New(st, svc, nil)
+	restarted.Ready = func() bool { return true }
+	r = waitRun(t, restarted, st, c, "success")
+	if r.Steps[0].Status != "success" || r.Steps[0].ExecutionID != 0 {
+		t.Fatalf("startup recovery rewrote a completed step: %+v", r.Steps[0])
+	}
+	n, _ := st.CountExecutions()
+	if n != 2 {
+		t.Fatalf("startup recovery should only rerun unfinished steps; executions=%d", n)
+	}
+}
+
+func TestStartupCancelledRecoveryIsOptIn(t *testing.T) {
+	_, st, svc, c := setup(t)
+	day := time.Now().UTC().Format("2006-01-02")
+	r, err := st.CreateChainRun(c, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Status = "cancelled"
+	if err = st.SaveChainRun(r); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	restarted := New(st, svc, nil)
+	restarted.Ready = func() bool { return true }
+	tick(t, restarted)
+	n, _ := st.CountExecutions()
+	if n != 0 {
+		t.Fatal("operator-cancelled run restarted without opt-in")
+	}
+	c.ResumeCancelledOnStartup = true
+	c.PolicyVersion = 1
+	if _, err = st.SaveChain(c, false); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	restarted = New(st, svc, nil)
+	restarted.Ready = func() bool { return true }
+	waitRun(t, restarted, st, c, "success")
+}
+
+func TestDeleteFinishedRunAllowsExplicitSameDayRetest(t *testing.T) {
+	e, st, _, c := setup(t)
+	r, err := st.CreateChainRun(c, time.Now().UTC().Format("2006-01-02"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Status = "cancelled"
+	if err = st.SaveChainRun(r); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.DeleteRun(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := e.RunNow(c.ID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.ID == r.ID || fresh.Status != "running" {
+		t.Fatalf("expected a fresh same-day occurrence, got %+v", fresh)
+	}
+}
