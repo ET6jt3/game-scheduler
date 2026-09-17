@@ -434,7 +434,6 @@ func (e *Engine) Control(id int64, action string) error {
 	return nil
 }
 
-
 // DeleteRun removes a finished chain occurrence. Task execution rows are kept
 // in the ordinary execution history; only the chain occurrence/progress record
 // is removed, allowing an explicit same-day retest to create a fresh run.
