@@ -273,7 +273,6 @@ func TestAtomicStepLinkAndDisabledPlans(t *testing.T) {
 	}
 }
 
-
 func TestStartupRecoversPreexistingInterruptedRun(t *testing.T) {
 	_, st, svc, c := setup(t)
 	day := time.Now().UTC().Format("2006-01-02")
