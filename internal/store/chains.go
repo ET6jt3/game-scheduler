@@ -11,15 +11,18 @@ import (
 // Chain definitions and run snapshots are separate: editing tomorrow's order
 // never rewrites the history or the progress of an existing occurrence.
 type Chain struct {
-	ID            int64   `json:"id"`
-	Name          string  `json:"name"`
-	Time          string  `json:"time"`
-	Zone          string  `json:"zone"`
-	Days          []int   `json:"days"`
-	TaskIDs       []int64 `json:"task_ids"`
-	Enabled       bool    `json:"enabled"`
-	CatchUp       bool    `json:"catch_up"`
-	FailurePolicy string  `json:"failure_policy"`
+	ID                        int64   `json:"id"`
+	Name                      string  `json:"name"`
+	Time                      string  `json:"time"`
+	Zone                      string  `json:"zone"`
+	Days                      []int   `json:"days"`
+	TaskIDs                   []int64 `json:"task_ids"`
+	Enabled                   bool    `json:"enabled"`
+	CatchUp                   bool    `json:"catch_up"`
+	ResumeIncompleteOnStartup bool    `json:"resume_incomplete_on_start"`
+	ResumeCancelledOnStartup  bool    `json:"resume_cancelled_on_start"`
+	PolicyVersion             int     `json:"policy_version,omitempty"`
+	FailurePolicy             string  `json:"failure_policy"`
 }
 type ChainStep struct {
 	TaskID      int64  `json:"task_id"`
@@ -44,6 +47,17 @@ func (s *Store) migrateChains() error {
  CREATE TABLE IF NOT EXISTS chain_execution_links (execution_id INTEGER PRIMARY KEY REFERENCES executions(id) ON DELETE CASCADE, run_id INTEGER NOT NULL REFERENCES chain_runs(id));`)
 	return err
 }
+func normalizeChainPolicy(c *Chain) {
+	// Chains saved before startup-resume policy existed should gain the safe
+	// default: recover failed/interrupted work from a previous daemon session,
+	// but never restart an operator-cancelled chain unless explicitly enabled.
+	if c.PolicyVersion == 0 {
+		c.ResumeIncompleteOnStartup = true
+		c.ResumeCancelledOnStartup = false
+		c.PolicyVersion = 1
+	}
+}
+
 func (s *Store) ListChains() ([]Chain, error) {
 	rows, err := s.db.Query(`SELECT id,definition FROM chains ORDER BY id`)
 	if err != nil {
@@ -61,6 +75,7 @@ func (s *Store) ListChains() ([]Chain, error) {
 		if err = json.Unmarshal([]byte(b), &c); err != nil {
 			return nil, err
 		}
+		normalizeChainPolicy(&c)
 		c.ID = id
 		out = append(out, c)
 	}
@@ -75,11 +90,15 @@ func (s *Store) GetChain(id int64) (Chain, error) {
 	var c Chain
 	if err == nil {
 		err = json.Unmarshal([]byte(b), &c)
+		if err == nil {
+			normalizeChainPolicy(&c)
+		}
 	}
 	c.ID = id
 	return c, err
 }
 func (s *Store) SaveChain(c Chain, disablePlans bool) (Chain, error) {
+	normalizeChainPolicy(&c)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return c, err
@@ -228,4 +247,34 @@ func (s *Store) CreateChainExecution(runID int64, index int, e Execution) (Execu
 		return e, err
 	}
 	return e, tx.Commit()
+}
+
+
+// DeleteChainRun removes one finished daily-chain occurrence while retaining
+// its underlying task execution rows as independent execution history.
+// Running/paused occurrences must be stopped or cancelled first.
+func (s *Store) DeleteChainRun(id int64) error {
+	r, err := s.GetChainRun(id)
+	if err != nil {
+		return err
+	}
+	if r.Status == "running" || r.Status == "paused" {
+		return fmt.Errorf("chain run %d is still %s", id, r.Status)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`DELETE FROM chain_execution_links WHERE run_id=?`, id); err != nil {
+		return err
+	}
+	res, err := tx.Exec(`DELETE FROM chain_runs WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
