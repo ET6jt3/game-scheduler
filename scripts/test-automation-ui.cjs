@@ -21,14 +21,14 @@ const os=require('node:os');
   }
   await page.goto(url+'/');await page.getByRole('link',{name:'每日任务链 / 自动启动'}).click();
   await page.locator('#task-picker option').first().waitFor({state:'attached'});
-  await page.locator('#name').fill('Daily games');await page.locator('#time').fill('06:00');await page.locator('#zone').fill('UTC');await page.locator('#enabled').uncheck();
+  await page.locator('#name').fill('Daily games');await page.locator('#time').fill('06:00');await page.locator('#zone').fill('UTC');await page.locator('#enabled').uncheck();if(!(await page.locator('#resume-incomplete').isChecked()))throw Error('resume-incomplete should default on');if(await page.locator('#resume-cancelled').isChecked())throw Error('resume-cancelled should default off');
   for(const option of await page.locator('#task-picker option').all()){await page.locator('#task-picker').selectOption(await option.getAttribute('value'));await page.locator('#add-step').click()}
   await page.locator('#steps .step').nth(2).getByRole('button',{name:'上移',exact:false}).click();
   if(!(await page.locator('#steps .step').nth(1).innerText()).includes('NTE'))throw Error('reorder failed');
   await page.locator('#editor button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#chains').textContent.includes('Daily games'));
   let data=await(await page.request.get(url+'/api/chains')).json();
-  if(data.chains.length!==1||data.chains[0].task_ids.join(',')!=='1,3,2'||data.chains[0].enabled)throw Error('saved chain mismatch');
+  if(data.chains.length!==1||data.chains[0].task_ids.join(',')!=='1,3,2'||data.chains[0].enabled||!data.chains[0].resume_incomplete_on_start||data.chains[0].resume_cancelled_on_start)throw Error('saved chain mismatch');
   await page.getByRole('button',{name:'编辑',exact:true}).click();await page.locator('#time').fill('07:30');await page.locator('#editor button[type=submit]').click();await page.waitForFunction(()=>document.querySelector('#chains').textContent.includes('07:30'));
   data=await(await page.request.get(url+'/api/chains')).json();if(data.chains.length!==1||data.chains[0].time!=='07:30')throw Error('edit did not persist');
   fs.mkdirSync('dist/ui',{recursive:true});await page.screenshot({path:'dist/ui/automation-desktop.png',fullPage:true});
