@@ -15,10 +15,11 @@ The page shows whether the registered path matches this package. After moving th
 1. Configure and test each real helper task from the dashboard first. The helper command must execute and finish its work, rather than merely open a settings window.
 2. Enter a name, choose the daily time and weekdays, and choose `Local` or an IANA time zone such as `Asia/Shanghai` or `America/Los_Angeles`.
 3. Add existing tasks in the desired order, e.g. BetterGI → HSR → NTE. Reorder with ↑ / ↓.
-4. Leave catch-up checked to run today's unfinished occurrence after late startup or resume. No previous days are replayed.
-5. Choose stop on failure (default) or continue to the next game. Retries and retry delays come from each task's existing settings. Each attempt uses the task timeout, defaulting to one hour for chains when unset.
-6. Leave **关闭这些任务原有的独立计划** checked to disable their separate cron schedules and prevent duplicate scheduled runs. Other chains are independent: do not put the same daily work in multiple enabled chains unless you intend separate runs.
-7. Save with Enabled checked. If today's time has already passed and catch-up is selected, the chain becomes eligible immediately.
+4. Leave catch-up checked to run today's occurrence after a late startup or resume. No previous days are replayed.
+5. Leave **Resume failed/interrupted on startup** enabled if a run from the previous daemon session should continue automatically after reboot. Successful steps are retained and only unfinished steps are reset. **Resume operator-cancelled on startup** is separate and defaults off, so intentionally stopping a broken helper does not make it restart immediately after reboot.
+6. Choose stop on failure (default) or continue to the next game. Retries and retry delays come from each task's existing settings. Each attempt uses the task timeout, defaulting to one hour for chains when unset.
+7. Leave **关闭这些任务原有的独立计划** checked to disable their separate cron schedules and prevent duplicate scheduled runs. Other chains are independent: do not put the same daily work in multiple enabled chains unless you intend separate runs.
+8. Save with Enabled checked. If today's time has already passed and catch-up is selected, the chain becomes eligible immediately.
 
 The engine checks once per second, including after sleep resumes. Today's run and successful steps are persisted in the existing SQLite database. Run today uses the same daily occurrence; repeated clicks do not run successful steps again. The daily key is the calendar date in the chain's selected zone (not the game's server reset time). Choose the zone and start time accordingly. DST repeated times run once; a nonexistent time runs at the first available minute after it.
 
@@ -28,9 +29,10 @@ The chain waits for previous manual work, then reserves the runner for its entir
 
 - **Pause** lets the current step finish and holds later steps. Completed steps stay recorded.
 - **Resume unfinished** retries failed/interrupted steps and keeps successful steps. It applies to today's run. Fix the helper's configuration before retrying uncertain work.
-- **Cancel** terminates the current step and prevents further automatic work for this occurrence.
+- **Cancel** terminates the current step and prevents further automatic work for this occurrence. A cancelled occurrence is not automatically resumed after reboot unless the chain's explicit cancelled-resume option is enabled.
+- **Delete record** is a manual action for finished occurrences. It removes only the chain occurrence/progress record; the underlying task execution logs remain in execution history. Deleting today's cancelled/failed record allows **Run today** to create a fresh same-day test occurrence.
 - Disabling a chain prevents new steps but lets an existing step finish. Re-enable to continue today's pending steps.
-- A restart during a step marks its outcome interrupted and requires Resume unfinished. The scheduler cannot know whether a game-side action succeeded just before a crash. It does not claim exactly-once game-side effects.
+- A restart during a step marks its outcome interrupted. With startup recovery enabled, a previous-session interrupted/failed occurrence is recovered automatically once today's scheduled time is due and the interactive desktop is ready; otherwise use Resume unfinished. The scheduler cannot know whether a game-side action succeeded just before a crash. It does not claim exactly-once game-side effects.
 - An unfinished prior-day occurrence expires before starting another step; it remains in history. If a step spans midnight it is allowed to finish; today's occurrence waits for the runner.
 - Editing an unfinished running/paused/interrupted chain is blocked. Finish or cancel it first so today's snapshot stays unambiguous.
 
