@@ -1,3 +1,24 @@
+# Download a ready-to-run Windows package from GitHub
+
+You do **not** need to clone the repository or install Go just to run/test a checkpoint.
+
+The `Portable Windows acceptance` GitHub Actions workflow builds the Windows x64
+portable package on every push to `portable-helper-hub`, on pull requests, and
+when manually dispatched. After a successful run, open the run's **Artifacts**
+section and download **GameScheduler-Portable-Windows-x64**. GitHub workflow
+artifacts are the supported way to retain and download build output from an
+Actions run.
+
+The artifact contains the runtime ZIP and SHA256 checksum. Extract
+`GameScheduler-Portable-Windows-x64.zip`, then double-click `Start.cmd`.
+The runtime package does not require Go, Node, Python, or an installer. Python is
+only needed by a helper that itself requires Python.
+
+For an existing installation, stop it first and retain its `Config`, `Data`,
+`Helpers`, and `Runtime` directories when updating. See `AUTOMATION.md`.
+
+---
+
 # Build on Windows without installing Go
 
 From the repository folder, run `Build.cmd` (PowerShell: `.\Build.cmd`).
