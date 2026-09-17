@@ -60,7 +60,6 @@ func TestChainAPIValidationAndOrigin(t *testing.T) {
 	}
 }
 
-
 func TestChainRunDeleteEndpoint(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "delete.db"))
 	if err != nil {
