@@ -27,17 +27,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'server build failed' }
           go build ./cmd/ctl
           if ($LASTEXITCODE -ne 0) { throw 'ctl build failed' }
-      - name: Build portable package and harmless fixture
-        shell: pwsh
-        run: |
-          ./scripts/build-portable.ps1
-          go build -o "$env:RUNNER_TEMP/fake-helper.exe" ./scripts/testdata/fake-helper
-          if ($LASTEXITCODE -ne 0) { throw 'fixture build failed' }
+      - name: Bootstrap and rebuild without system Go (Windows PowerShell 5.1)
+        shell: powershell
+        run: ./scripts/test-portable-build.ps1
       - name: Smoke package, relocation, persistence and launchers
         timeout-minutes: 5
         shell: pwsh
         run: |
-          python scripts/portable-smoke.py --package dist/GameScheduler-Portable --fixture "$env:RUNNER_TEMP/fake-helper.exe" | Tee-Object -FilePath dist/windows-smoke-report.json
+          python scripts/portable-smoke.py --package dist/GameScheduler-Portable --fixture dist/fake-helper.exe | Tee-Object -FilePath dist/windows-smoke-report.json
           if ($LASTEXITCODE -ne 0) { throw 'smoke failed' }
       - uses: actions/upload-artifact@v7
         with:
