@@ -22,9 +22,14 @@ import (
 // Nested jobs are supported since Windows 8, so assigning a child whose
 // parent is already in a job is fine.
 func assignJob(p *os.Process) (release func(), err error) {
+	release, _, err = trackJob(p)
+	return
+}
+
+func trackJob(p *os.Process) (release func(), remaining func() (bool, error), err error) {
 	h, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
-		return func() {}, err
+		return func() {}, nil, err
 	}
 	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
 		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
@@ -34,7 +39,7 @@ func assignJob(p *os.Process) (release func(), err error) {
 	if _, err := windows.SetInformationJobObject(h, windows.JobObjectExtendedLimitInformation,
 		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
 		_ = windows.CloseHandle(h)
-		return func() {}, err
+		return func() {}, nil, err
 	}
 	// Windows PIDs are DWORDs from the OS: os.Process.Pid can never be
 	// negative nor exceed uint32 on this platform, so both conversions in
@@ -42,14 +47,21 @@ func assignJob(p *os.Process) (release func(), err error) {
 	ph, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid)) //#nosec G115 -- Windows PIDs are DWORDs, see comment above
 	if err != nil {
 		_ = windows.CloseHandle(h)
-		return func() {}, err
+		return func() {}, nil, err
 	}
 	defer windows.CloseHandle(ph)
 	if err := windows.AssignProcessToJobObject(h, ph); err != nil {
 		_ = windows.CloseHandle(h)
-		return func() {}, err
+		return func() {}, nil, err
 	}
-	return func() { _ = windows.CloseHandle(h) }, nil
+	return func() { _ = windows.CloseHandle(h) }, func() (bool, error) {
+		var info struct {
+			TotalUserTime, TotalKernelTime, ThisPeriodTotalUserTime, ThisPeriodTotalKernelTime int64
+			TotalPageFaultCount, TotalProcesses, ActiveProcesses, TotalTerminatedProcesses     uint32
+		}
+		err := windows.QueryInformationJobObject(h, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil)
+		return info.ActiveProcesses > 0, err
+	}, nil
 }
 
 // killProcessTree terminates the process and all of its descendants. Go's

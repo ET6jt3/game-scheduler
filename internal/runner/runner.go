@@ -19,11 +19,12 @@ import (
 
 // Spec fully describes how to launch one external tool invocation.
 type Spec struct {
-	Path    string        // absolute or PATH-resolvable executable
-	Args    []string      // command-line arguments
-	Dir     string        // working directory (optional)
-	Env     []string      // extra environment, appended to os.Environ()
-	Timeout time.Duration // 0 means no timeout
+	RequireCompleteTree bool          // Windows chains reject launcher-only exits with live descendants
+	Path                string        // absolute or PATH-resolvable executable
+	Args                []string      // command-line arguments
+	Dir                 string        // working directory (optional)
+	Env                 []string      // extra environment, appended to os.Environ()
+	Timeout             time.Duration // 0 means no timeout
 }
 
 // CommandLine renders the spec for logging/storage. It is informational only
@@ -100,10 +101,25 @@ func Run(ctx context.Context, spec Spec) Result {
 		// From this point the child (and its whole future tree) lives in a
 		// kill-on-close job, so a scheduler hard-exit cannot orphan it. The
 		// close after Wait also finishes off anything still dying.
-		if release, jerr := assignJob(cmd.Process); jerr == nil {
+		release, remaining, jerr := trackJob(cmd.Process)
+		if jerr == nil {
 			defer release()
 		}
-		err = cmd.Wait()
+		if jerr != nil && spec.RequireCompleteTree {
+			_ = killProcessTree(cmd.Process)
+			_ = cmd.Wait()
+			err = fmt.Errorf("cannot track helper process tree: %w", jerr)
+		} else {
+			err = cmd.Wait()
+			if spec.RequireCompleteTree && remaining != nil {
+				alive, checkErr := remaining()
+				if checkErr != nil {
+					err = fmt.Errorf("cannot verify helper completion: %w", checkErr)
+				} else if alive {
+					err = errors.New("helper launcher exited with child processes still running; completion is unknown. Use the worker command or disable automatic launcher exit before chaining")
+				}
+			}
+		}
 	}
 	res.EndTime = time.Now()
 	res.Stdout = stdout.String()
@@ -120,6 +136,8 @@ func Run(ctx context.Context, spec Spec) Result {
 		if errors.As(err, &ee) {
 			res.ExitCode = ee.ExitCode()
 			res.Err = fmt.Errorf("runner: exit code %d", res.ExitCode)
+		} else if res.Started {
+			res.Err = fmt.Errorf("runner: %w", err)
 		} else {
 			res.Err = fmt.Errorf("runner: failed to start: %w", err)
 		}

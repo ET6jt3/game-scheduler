@@ -36,6 +36,9 @@ jobs:
         run: |
           python scripts/portable-smoke.py --package dist/GameScheduler-Portable --fixture dist/fake-helper.exe | Tee-Object -FilePath dist/windows-smoke-report.json
           if ($LASTEXITCODE -ne 0) { throw 'smoke failed' }
+      - name: Windows sign-in startup registration and relocation
+        shell: powershell
+        run: ./scripts/test-startup.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: GameScheduler-Portable-Windows-x64

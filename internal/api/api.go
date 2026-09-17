@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/xiabee/game-scheduler/internal/chains"
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
@@ -27,11 +28,12 @@ import (
 	"github.com/xiabee/game-scheduler/internal/task"
 )
 
-//go:embed web/index.html web/helpers.html
+//go:embed web/index.html web/helpers.html web/automation.html
 var webFS embed.FS
 
 // Server holds dependencies for the HTTP handlers.
 type Server struct {
+	Chains          *chains.Engine
 	RequestShutdown func()
 	root            string
 	store           *store.Store
@@ -86,6 +88,7 @@ func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *gam
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.helperRoutes(mux)
+	s.chainRoutes(mux)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "adapters": s.reg.Keys(), "root": s.root})

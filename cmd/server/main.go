@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/xiabee/game-scheduler/internal/api"
+	"github.com/xiabee/game-scheduler/internal/chains"
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
@@ -138,6 +139,10 @@ func run() int {
 		return 1
 	}
 	defer sched.Stop()
+	chainEngine := chains.New(st, svc, log)
+	chainEngine.Ready = func() bool { return !mon.ShouldPause() && chains.DesktopReady() }
+	chainEngine.Start()
+	defer chainEngine.Stop()
 
 	// Execution-log retention: delete finished executions older than the
 	// configured window (default 30 days) so the database does not grow
@@ -168,6 +173,7 @@ func run() int {
 
 	stop := make(chan os.Signal, 1)
 	apiSrv := api.New(st, svc, sched, reg, bus, mon, cfg, log)
+	apiSrv.Chains = chainEngine
 	apiSrv.RequestShutdown = func() {
 		select {
 		case stop <- syscall.SIGTERM:
@@ -204,6 +210,7 @@ func run() int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	chainEngine.Stop()
 	svc.Shutdown(ctx)
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error("shutdown", "err", err)

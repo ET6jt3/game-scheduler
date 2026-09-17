@@ -23,3 +23,7 @@ App\ctl.exe helper-definitions reload
 ```
 
 Use `-server http://127.0.0.1:<port>` and `-token <token>` if configured. See PORTABLE-LAYOUT.md and MIGRATION-NOTES.md for details. No game is launched until a task is manually run or its enabled plan fires.
+
+## Daily chains and automatic startup
+
+Open **每日任务链 / 自动启动** from the dashboard. Set a time, select days, add tasks in order, and save. The same page enables startup at Windows sign-in. `Setup-Startup.cmd` and `Remove-Startup.cmd` are standalone shortcuts. See [AUTOMATION.md](AUTOMATION.md) for catch-up, recovery and preserving your existing settings during an update.

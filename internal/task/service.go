@@ -61,11 +61,12 @@ type Service struct {
 
 	notify NotifyFunc // optional operator alert hook
 
-	mu      sync.Mutex
-	running map[int64]context.CancelFunc // execID -> cancel
-	active  map[int64]int                // taskID -> count of pending/running execs
-	wg      sync.WaitGroup               // tracks in-flight workers
-	closing bool                         // set by Shutdown; rejects new Enqueue
+	mu         sync.Mutex
+	running    map[int64]context.CancelFunc // execID -> cancel
+	active     map[int64]int                // taskID -> count of pending/running execs
+	wg         sync.WaitGroup               // tracks in-flight workers
+	chainOwner int64                        // reserves the shared desktop for one complete chain
+	closing    bool                         // set by Shutdown; rejects new Enqueue
 }
 
 // SetNotify installs an operator-alert hook, called when a task fails.
@@ -104,6 +105,14 @@ func NewService(s *store.Store, reg *game.Registry, cfg config.Config, bus *even
 // returned — this is how scheduled fires avoid stacking on top of a run that is
 // still going.
 func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfActive bool) (exec store.Execution, skipped bool, err error) {
+	return s.enqueue(taskID, trigger, planID, skipIfActive, 0, 0)
+}
+
+func (s *Service) EnqueueChain(taskID, runID int64, step int) (store.Execution, bool, error) {
+	return s.enqueue(taskID, "chain", nil, true, runID, step)
+}
+
+func (s *Service) enqueue(taskID int64, trigger string, planID *int64, skipIfActive bool, runID int64, step int) (exec store.Execution, skipped bool, err error) {
 	if _, err = s.store.GetTask(taskID); err != nil {
 		return store.Execution{}, false, err
 	}
@@ -113,13 +122,20 @@ func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfAct
 		s.mu.Unlock()
 		return store.Execution{}, false, errShuttingDown
 	}
+	if (s.chainOwner != 0 && s.chainOwner != runID) || (runID != 0 && s.chainOwner != runID) {
+		s.mu.Unlock()
+		return store.Execution{}, false, fmt.Errorf("a daily chain owns the runner; wait or pause it first")
+	}
 	if skipIfActive && s.active[taskID] > 0 {
 		s.mu.Unlock()
 		return store.Execution{}, true, nil
 	}
-	exec, err = s.store.CreateExecution(store.Execution{
-		TaskID: taskID, PlanID: planID, Trigger: trigger, Status: store.StatusPending,
-	})
+	pending := store.Execution{TaskID: taskID, PlanID: planID, Trigger: trigger, Status: store.StatusPending}
+	if runID != 0 {
+		exec, err = s.store.CreateChainExecution(runID, step, pending)
+	} else {
+		exec, err = s.store.CreateExecution(pending)
+	}
 	if err != nil {
 		s.mu.Unlock()
 		return store.Execution{}, false, err
@@ -538,6 +554,9 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	if err != nil {
 		return s.finishWithError(exec, fmt.Errorf("load task: %w", err))
 	}
+	if exec.Trigger == "chain" && t.TimeoutSec <= 0 {
+		t.TimeoutSec = 3600
+	}
 	// executor "auto" re-resolves HERE, at fire time: native runs only
 	// when its prerequisites still hold; anything else (including params
 	// that no longer decode) falls back to the external adapter path.
@@ -601,6 +620,7 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 		}
 	}
 
+	spec.RequireCompleteTree = exec.Trigger == "chain"
 	exec.Command = spec.CommandLine()
 	exec.Status = store.StatusRunning
 	start := time.Now().UTC()
@@ -750,4 +770,34 @@ func renderTemplate(tpl string, data any) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// ReserveChain waits for all older workers, then excludes manual and cron runs.
+func (s *Service) ReserveChain(id int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing || (s.chainOwner != 0 && s.chainOwner != id) {
+		return false
+	}
+	if s.chainOwner == id {
+		return true
+	}
+	if len(s.running) != 0 {
+		return false
+	}
+	s.chainOwner = id
+	return true
+}
+func (s *Service) ReleaseChain(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.chainOwner == id && len(s.running) == 0 {
+		s.chainOwner = 0
+	}
+}
+func (s *Service) ExecutionActive(id int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.running[id]
+	return ok
 }

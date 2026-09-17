@@ -22,11 +22,11 @@ try{
   Write-Host "Building $cmd with repository-local Go ..."
   & (Join-Path $PSScriptRoot 'portable-go.ps1') -GoArgs @('build','-trimpath','-ldflags',"-s -w -X github.com/xiabee/game-scheduler/internal/version.Version=portable-$revision",'-o',(Join-Path $stage "App\$cmd.exe"),"./cmd/$cmd")
  }
- foreach($cmd in @('Start.cmd','Stop.cmd')){Copy-Item (Join-Path $repoRoot "packaging\$cmd") $stage}
- Copy-Item (Join-Path $repoRoot 'packaging\Portable.ps1') (Join-Path $stage 'App')
+ foreach($cmd in @('Start.cmd','Stop.cmd','Setup-Startup.cmd','Remove-Startup.cmd')){Copy-Item (Join-Path $repoRoot "packaging\$cmd") $stage}
+ foreach($script in @('Portable.ps1','Startup.ps1')){Copy-Item (Join-Path $repoRoot ('packaging\'+$script)) (Join-Path $stage 'App')}
  Copy-Item (Join-Path $repoRoot 'packaging\config.example.json') (Join-Path $stage 'Config')
  Copy-Item (Join-Path $repoRoot 'Config\helpers\ok-nte.json') (Join-Path $stage 'Config\helpers')
- foreach($file in @('LICENSE','PORTABLE-LAYOUT.md','MIGRATION-NOTES.md','IMPLEMENTATION-REPORT.md','TEST-REPORT.md')){if(Test-Path $file){Copy-Item $file $stage}}
+ foreach($file in @('LICENSE','PORTABLE-LAYOUT.md','MIGRATION-NOTES.md','IMPLEMENTATION-REPORT.md','TEST-REPORT.md','AUTOMATION.md')){if(Test-Path $file){Copy-Item $file $stage}}
  Copy-Item (Join-Path $repoRoot 'packaging\README.md') (Join-Path $stage 'README.md')
  Copy-Item (Join-Path $repoRoot 'examples\helper-instances.json') (Join-Path $stage 'Config\helper-instances.example.json')
  Set-Content -LiteralPath (Join-Path $stage 'Helpers\README.txt') -Value 'Optional managed helpers. Install only by explicit choice; external helpers may live anywhere.' -Encoding UTF8
