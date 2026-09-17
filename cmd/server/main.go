@@ -19,6 +19,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/game"
 	"github.com/xiabee/game-scheduler/internal/game/genshin"
 	"github.com/xiabee/game-scheduler/internal/game/hsr"
+	"github.com/xiabee/game-scheduler/internal/game/nte"
 	"github.com/xiabee/game-scheduler/internal/game/r1999"
 	"github.com/xiabee/game-scheduler/internal/game/wuwa"
 	"github.com/xiabee/game-scheduler/internal/monitor"
@@ -87,19 +88,15 @@ func run() int {
 
 	bus := events.New()
 	notifier := notify.New(cfg.NotifyCmd, log)
-	reg := game.NewRegistry(genshin.New(), hsr.New(), wuwa.New(), r1999.New())
+	reg := game.NewRegistry(genshin.New(), hsr.New(), wuwa.New(), nte.New(), r1999.New())
 	svc := task.NewService(st, reg, cfg, bus, log)
 	svc.SetNotify(notifier.Send)
-	// Drain in-flight task workers before the deferred st.Close() runs (defers
-	// are LIFO, so registering this after st.Close keeps the order: scheduler
-	// stop -> drain executions -> close store).
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		svc.Shutdown(ctx)
 	}()
 
-	// Resource monitor: live CPU/RAM sampling + optional overload gating.
 	monCtx, monCancel := context.WithCancel(context.Background())
 	defer monCancel()
 	mon := monitor.New(monitor.Config{
@@ -121,9 +118,8 @@ func run() int {
 	}
 	defer sched.Stop()
 
-	// Execution-log retention: delete finished executions older than the
-	// configured window (default 30 days) so the database does not grow
-	// without bound. Runs once at startup and then every 6 hours.
+	// Execution-log retention is opt-in when configured > 0; portable packages
+	// may set it to 0 to retain history until the operator deletes records.
 	if cfg.ExecutionRetentionDays > 0 {
 		prune := func() {
 			cutoff := time.Now().UTC().AddDate(0, 0, -cfg.ExecutionRetentionDays)
@@ -154,8 +150,6 @@ func run() int {
 		Handler:           apiSrv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	// Release SSE clients on shutdown: without this, Shutdown waits out its
-	// whole timeout on every open dashboard event stream.
 	srv.RegisterOnShutdown(apiSrv.ShutdownStreams)
 
 	serverErr := make(chan error, 1)
@@ -170,8 +164,6 @@ func run() int {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	select {
 	case err := <-serverErr:
-		// Return (not os.Exit) so the defers above still drain workers and
-		// close the store cleanly.
 		log.Error("http server", "err", err)
 		return 1
 	case <-stop:

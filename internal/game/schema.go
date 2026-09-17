@@ -61,6 +61,13 @@ var schemas = map[string][]TaskTypeInfo{
 				{Key: "exit", Label: "运行完成后退出 (-e)", Type: "bool", Default: true}}},
 		rawType,
 	},
+	"nte": {
+		{Type: "task", Label: "NTE 任务", Desc: "ok-nte 运行第 N 个任务;序号以 ok-nte 当前配置为准",
+			Fields: []Field{
+				{Key: "task_index", Label: "任务序号 (-t N)", Type: "number", Required: true, Default: 1},
+				{Key: "exit", Label: "运行完成后退出 (-e)", Type: "bool", Default: true}}},
+		rawType,
+	},
 	"r1999": {
 		{Type: "run", Label: "运行(默认/指定配置)", Desc: "MaaPiCli 按 M9A 项目配置运行(收荒原/每日心相/常规作战按其配置)",
 			Fields: []Field{{Key: "config", Label: "配置名 (-c)", Type: "text", Placeholder: "留空使用默认配置"}}},
