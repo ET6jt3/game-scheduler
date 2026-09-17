@@ -1,5 +1,7 @@
 name: Portable Windows acceptance
 on:
+  push:
+    branches: [portable-helper-hub]
   pull_request:
   workflow_dispatch:
 permissions:
