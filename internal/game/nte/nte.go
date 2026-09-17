@@ -20,8 +20,8 @@ const Key = "nte"
 // Adapter implements game.Adapter for ok-nte.exe.
 type Adapter struct{}
 
-func New() *Adapter { return &Adapter{} }
-func (a *Adapter) Key() string { return Key }
+func New() *Adapter                    { return &Adapter{} }
+func (a *Adapter) Key() string         { return Key }
 func (a *Adapter) TaskTypes() []string { return []string{"task", "raw"} }
 
 func (a *Adapter) Validate(g store.Game) error {
