@@ -30,8 +30,8 @@ if($Action -ne 'Status'){
   if($child.ExitCode -ne 0){throw 'Startup setup was cancelled or failed. No success was recorded.'}
  }elseif($Action -eq 'Enable'){
   $exe=Join-Path $PSHOME 'powershell.exe'
-  $args='-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$launcher+'" -Action Start -NoBrowser'
-  $taskAction=New-ScheduledTaskAction -Execute $exe -Argument $args -WorkingDirectory $PSScriptRoot
+  $launchArguments='-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$launcher+'" -Action Start -NoBrowser'
+  $taskAction=New-ScheduledTaskAction -Execute $exe -Argument $launchArguments -WorkingDirectory $PSScriptRoot
   $trigger=New-ScheduledTaskTrigger -AtLogOn -User $UserSid
   $trigger.Delay='PT30S'
   $level='Limited';if($Elevated){$level='Highest'}
@@ -41,6 +41,6 @@ if($Action -ne 'Status'){
  }elseif($existing){Unregister-ScheduledTask -TaskName $name -Confirm:$false}
 }
 $existing=Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-$matches=$false
-if($existing){$matches=$existing.Actions.Arguments -eq ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$launcher+'" -Action Start -NoBrowser')}
-[ordered]@{supported=$true;enabled=($null -ne $existing -and $existing.State -ne 'Disabled');current_package=[bool]$matches;elevated=($null -ne $existing -and $existing.Principal.RunLevel -eq 'Highest');task_name=$name;app_directory=$PSScriptRoot;registered_arguments=$(if($existing){$existing.Actions.Arguments}else{''})} | ConvertTo-Json -Compress
+$matchesPackage=$false
+if($existing){$matchesPackage=$existing.Actions.Arguments -eq ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$launcher+'" -Action Start -NoBrowser')}
+[ordered]@{supported=$true;enabled=($null -ne $existing -and $existing.State -ne 'Disabled');current_package=[bool]$matchesPackage;elevated=($null -ne $existing -and $existing.Principal.RunLevel -eq 'Highest');task_name=$name;app_directory=$PSScriptRoot;registered_arguments=$(if($existing){$existing.Actions.Arguments}else{''})} | ConvertTo-Json -Compress
