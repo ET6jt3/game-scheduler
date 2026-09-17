@@ -17,20 +17,21 @@ import (
 )
 
 type Engine struct {
-	mu     sync.Mutex
-	st     *store.Store
-	svc    *task.Service
-	log    *slog.Logger
-	Ready  func() bool
-	done   chan struct{}
-	cancel context.CancelFunc
+	mu        sync.Mutex
+	st        *store.Store
+	svc       *task.Service
+	log       *slog.Logger
+	Ready     func() bool
+	done      chan struct{}
+	cancel    context.CancelFunc
+	startedAt time.Time
 }
 
 func New(st *store.Store, svc *task.Service, log *slog.Logger) *Engine {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Engine{st: st, svc: svc, log: log, Ready: DesktopReady}
+	return &Engine{st: st, svc: svc, log: log, Ready: DesktopReady, startedAt: time.Now().UTC()}
 }
 func (e *Engine) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -201,6 +202,10 @@ func (e *Engine) Tick(now time.Time) error {
 	}
 	sort.Slice(runs, func(i, j int) bool { return runs[i].ID < runs[j].ID })
 	for _, r := range runs {
+		// A terminal run is eligible for automatic startup recovery only when
+		// it predates this daemon session. This prevents an operator cancelling
+		// a broken helper from having it immediately restart in the same session.
+		preexistingAtStartup := r.UpdatedAt.Before(e.startedAt)
 		changed := false
 		interrupted := false
 		for i, s := range r.Steps {
@@ -235,16 +240,36 @@ func (e *Engine) Tick(now time.Time) error {
 		if interrupted && r.Status != "cancelled" {
 			r.Status = "interrupted"
 		}
+		c := byID[r.ChainID]
 		if changed {
 			if err = e.st.SaveChainRun(r); err != nil {
 				return err
+			}
+		}
+		if r.Status != "running" && preexistingAtStartup {
+			_, due := Due(c, now)
+			resume := due && ((c.ResumeIncompleteOnStartup && (r.Status == "failed" || r.Status == "interrupted")) ||
+				(c.ResumeCancelledOnStartup && r.Status == "cancelled"))
+			if resume {
+				for i := range r.Steps {
+					if r.Steps[i].Status == "success" {
+						continue
+					}
+					r.Steps[i].Status = "pending"
+					r.Steps[i].ExecutionID = 0
+					r.Steps[i].Error = ""
+				}
+				r.Status = "running"
+				if err = e.st.SaveChainRun(r); err != nil {
+					return err
+				}
+				e.log.Info("daily chain recovered after daemon startup", "run_id", r.ID, "chain_id", r.ChainID)
 			}
 		}
 		if r.Status != "running" {
 			e.svc.ReleaseChain(r.ID)
 			continue
 		}
-		c := byID[r.ChainID]
 		loc, lerr := Location(c)
 		if lerr != nil {
 			return lerr
@@ -407,4 +432,27 @@ func (e *Engine) Control(id int64, action string) error {
 	}
 	e.svc.ReleaseChain(r.ID)
 	return nil
+}
+
+
+// DeleteRun removes a finished chain occurrence. Task execution rows are kept
+// in the ordinary execution history; only the chain occurrence/progress record
+// is removed, allowing an explicit same-day retest to create a fresh run.
+func (e *Engine) DeleteRun(id int64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	r, err := e.st.GetChainRun(id)
+	if err != nil {
+		return err
+	}
+	if r.Status == "running" || r.Status == "paused" {
+		return fmt.Errorf("stop or cancel the chain before deleting its record")
+	}
+	for _, step := range r.Steps {
+		if step.ExecutionID != 0 && e.svc.ExecutionActive(step.ExecutionID) {
+			return fmt.Errorf("execution %d is still active", step.ExecutionID)
+		}
+	}
+	e.svc.ReleaseChain(r.ID)
+	return e.st.DeleteChainRun(id)
 }
