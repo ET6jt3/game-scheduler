@@ -39,7 +39,8 @@ try{
  foreach($key in @('GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOTELEMETRYDIR')){
   if(!$goEnv.$key.StartsWith((Join-Path $repoRoot 'Toolchain'),[StringComparison]::OrdinalIgnoreCase)){throw "$key escaped repository: $($goEnv.$key)"}
  }
- if($goEnv.GOENV -ne 'off' -or $goEnv.GOTOOLCHAIN -ne 'local' -or $goEnv.GOTELEMETRY -ne 'off'){throw 'Go isolation settings incorrect'}
+ # GOENV=off is reported as an empty filename by `go env GOENV`.
+ if($goEnv.GOENV -ne '' -or $goEnv.GOTOOLCHAIN -ne 'local' -or $goEnv.GOTELEMETRY -ne 'off'){throw ('Go isolation settings incorrect: '+($goEnv | ConvertTo-Json -Compress))}
  if($env:GOROOT -ne 'Z:\nonexistent-system-go' -or $env:GOPATH -ne 'Z:\nonexistent-user-cache' -or $env:TEMP -ne $oldTemp -or $env:APPDATA -ne $oldAppData){throw 'Caller environment was not restored'}
  Write-Host 'PASS: repository-local Go environment and restored caller settings'
  # Relocate the compiler to a repository path with spaces and invoke it again.

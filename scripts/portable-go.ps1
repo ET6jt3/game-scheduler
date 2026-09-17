@@ -35,7 +35,9 @@ try{
   if((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash){throw "Cached Go ZIP failed SHA256 verification. Remove $archive and retry."}
   Write-Host 'Extracting verified Go archive ...'
   $unpack=Join-Path $toolsRoot ('extract-'+[Guid]::NewGuid().ToString('N'))
-  Expand-Archive -LiteralPath $archive -DestinationPath $unpack
+  # Expand-Archive in Windows PowerShell is very slow for Go's many small files.
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  [IO.Compression.ZipFile]::ExtractToDirectory($archive,$unpack)
   if(!(Test-Path -LiteralPath (Join-Path $unpack 'go\bin\go.exe'))){throw 'Go archive has no compiler.'}
   Move-Item -LiteralPath $unpack -Destination $install
   $unpack=$null
