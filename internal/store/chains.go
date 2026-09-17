@@ -249,7 +249,6 @@ func (s *Store) CreateChainExecution(runID int64, index int, e Execution) (Execu
 	return e, tx.Commit()
 }
 
-
 // DeleteChainRun removes one finished daily-chain occurrence while retaining
 // its underlying task execution rows as independent execution history.
 // Running/paused occurrences must be stopped or cancelled first.
