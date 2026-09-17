@@ -9,15 +9,15 @@ func TestDeleteExecutionTerminalOnly(t *testing.T) {
 	s := newTestStore(t)
 	mkGame(t, s, "g")
 	task, err := s.CreateTask(Task{GameID: "g", Name: "t", Type: "raw", Enabled: true})
-	if err != nil { t.Fatal(err) }
+	if err != nil {\n\t\tt.Fatal(err)\n\t}
 
 	for _, status := range []string{StatusFailed, StatusCancelled, StatusSuccess} {
 		e, err := s.CreateExecution(Execution{TaskID: task.ID, Trigger: TriggerManual, Status: status})
 		if err != nil { t.Fatal(err) }
 		deleted, err := s.DeleteExecution(e.ID)
-		if err != nil { t.Fatalf("delete %s: %v", status, err) }
-		if deleted.Status != status { t.Fatalf("deleted status=%q want %q", deleted.Status, status) }
-		if _, err := s.GetExecution(e.ID); !errors.Is(err, ErrNotFound) { t.Fatalf("row still exists: %v", err) }
+		if err != nil {\n\t\t\tt.Fatalf("delete %s: %v", status, err)\n\t\t}
+		if deleted.Status != status {\n\t\t\tt.Fatalf("deleted status=%q want %q", deleted.Status, status)\n\t\t}
+		if _, err := s.GetExecution(e.ID); !errors.Is(err, ErrNotFound) {\n\t\t\tt.Fatalf("row still exists: %v", err)\n\t\t}
 	}
 }
 
@@ -33,6 +33,6 @@ func TestDeleteExecutionRejectsActive(t *testing.T) {
 		if _, err := s.DeleteExecution(e.ID); !errors.Is(err, ErrExecutionActive) {
 			t.Fatalf("delete %s err=%v, want ErrExecutionActive", status, err)
 		}
-		if _, err := s.GetExecution(e.ID); err != nil { t.Fatalf("active row was removed: %v", err) }
+		if _, err := s.GetExecution(e.ID); err != nil {\n\t\t\tt.Fatalf("active row was removed: %v", err)\n\t\t}
 	}
 }
