@@ -77,6 +77,22 @@ func (s *Server) chainRoutes(m *http.ServeMux) {
 		}
 		writeJSON(w, 202, v)
 	})
+	m.HandleFunc("DELETE /api/chain-runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !s.chainsReady(w) {
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		if err = s.Chains.DeleteRun(id); err != nil {
+			writeErr(w, 409, err)
+			return
+		}
+		s.bus.Notify()
+		w.WriteHeader(http.StatusNoContent)
+	})
 	m.HandleFunc("POST /api/chain-runs/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		if !s.chainsReady(w) {
 			return
