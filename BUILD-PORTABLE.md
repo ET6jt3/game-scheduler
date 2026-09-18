@@ -14,8 +14,24 @@ The artifact contains the runtime ZIP and SHA256 checksum. Extract
 The runtime package does not require Go, Node, Python, or an installer. Python is
 only needed by a helper that itself requires Python.
 
-For an existing installation, stop it first and retain its `Config`, `Data`,
-`Helpers`, and `Runtime` directories when updating. See `AUTOMATION.md`.
+For an existing installation, the safest upgrade path is **side-by-side**:
+
+1. Stop the old package with its `Stop.cmd`.
+2. Download and extract the new GitHub Actions artifact to a new folder.
+3. In the new folder run:
+   `Migrate-From-Previous.cmd "D:\path\to\old\GameScheduler-Portable"`
+4. Start the new folder with `Start.cmd`.
+5. If Windows auto-start was enabled, run the new folder's `Setup-Startup.cmd`
+   once so Task Scheduler points to the new location.
+
+The migration utility copies persistent state only: `Data` (including
+`scheduler.db` with games, tasks, plans, daily chains, helper instances and
+history), `Config\config.json`, user helper manifests, and managed
+`Helpers`/`Runtime`. It does **not** copy the old `App` binaries. External
+helper paths remain external and unchanged. The destination's prior state is
+backed up under `Backups\pre-migration-<timestamp>` before replacement.
+
+See `AUTOMATION.md` for chain behavior.
 
 ---
 
