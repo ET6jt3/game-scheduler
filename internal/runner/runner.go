@@ -157,7 +157,7 @@ func Run(ctx context.Context, spec Spec) Result {
 				return res
 			}
 			if spec.RequireCompleteTree && remaining != nil {
-				alive, checkErr := remaining()
+				alive, checkErr := waitForTreeDrain(remaining, time.Second)
 				if checkErr != nil {
 					err = fmt.Errorf("cannot verify helper completion: %w", checkErr)
 				} else if alive {
@@ -262,4 +262,18 @@ func (m *markerBuffer) Write(p []byte) (int, error) {
 		m.tail = combined
 	}
 	return n, err
+}
+
+func waitForTreeDrain(remaining func() (bool, error), grace time.Duration) (bool, error) {
+	deadline := time.Now().Add(grace)
+	for {
+		alive, err := remaining()
+		if err != nil || !alive {
+			return alive, err
+		}
+		if time.Now().After(deadline) {
+			return true, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
