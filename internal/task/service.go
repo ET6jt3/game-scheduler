@@ -26,6 +26,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
+	"github.com/xiabee/game-scheduler/internal/game/cmdutil"
 	"github.com/xiabee/game-scheduler/internal/helper"
 	"github.com/xiabee/game-scheduler/internal/runner"
 	"github.com/xiabee/game-scheduler/internal/shellcmd"
