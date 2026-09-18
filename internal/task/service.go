@@ -610,12 +610,7 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	// Existing per-task timeouts still apply to manual/cron runs. Operators may
 	// explicitly opt a chain step into the hard timeout with
 	// params.chain_hard_timeout=true.
-	if exec.Trigger == "chain" {
-		params, _ := t.ParamsMap()
-		if !cmdutil.Bool(params, "chain_hard_timeout", false) {
-			spec.Timeout = 0
-		}
-	}
+	applyChainExecutionPolicy(exec.Trigger, t, &spec)
 
 	if s.Helpers != nil {
 		pf := s.checkExternalSpec(Preflight{TaskID: t.ID, TaskName: t.Name, GameID: g.ID, Adapter: g.Adapter, HelperInstance: instance}, g, t, spec)
@@ -808,4 +803,15 @@ func (s *Service) ExecutionActive(id int64) bool {
 	defer s.mu.Unlock()
 	_, ok := s.running[id]
 	return ok
+}
+
+
+func applyChainExecutionPolicy(trigger string, t store.Task, spec *runner.Spec) {
+	if trigger != "chain" || spec == nil {
+		return
+	}
+	params, _ := t.ParamsMap()
+	if !cmdutil.Bool(params, "chain_hard_timeout", false) {
+		spec.Timeout = 0
+	}
 }
