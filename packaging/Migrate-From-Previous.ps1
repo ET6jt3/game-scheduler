@@ -46,24 +46,24 @@ foreach($rel in @('Data','Config\config.json','Config\helpers','Helpers','Runtim
 
 # scheduler.db and Data contain games/tasks/plans/chains/helper instances/history.
 if(Test-Path -LiteralPath (Join-Path $PreviousRoot 'Data')){
-  Copy-Item -LiteralPath (Join-Path $PreviousRoot 'Data\*') -Destination (Join-Path $NewRoot 'Data') -Recurse -Force
+  Copy-Item -Path (Join-Path $PreviousRoot 'Data\*') -Destination (Join-Path $NewRoot 'Data') -Recurse -Force
 }
 if(Test-Path -LiteralPath (Join-Path $PreviousRoot 'Config\config.json')){
   Copy-Item -LiteralPath (Join-Path $PreviousRoot 'Config\config.json') -Destination (Join-Path $NewRoot 'Config\config.json') -Force
 }
 if(Test-Path -LiteralPath (Join-Path $PreviousRoot 'Config\helpers')){
   [void][IO.Directory]::CreateDirectory((Join-Path $NewRoot 'Config\helpers'))
-  Copy-Item -LiteralPath (Join-Path $PreviousRoot 'Config\helpers\*') -Destination (Join-Path $NewRoot 'Config\helpers') -Recurse -Force
+  Copy-Item -Path (Join-Path $PreviousRoot 'Config\helpers\*') -Destination (Join-Path $NewRoot 'Config\helpers') -Recurse -Force
 }
 foreach($rel in @('Helpers','Runtime')){
   $src=Join-Path $PreviousRoot $rel
   if(Test-Path -LiteralPath $src){
     [void][IO.Directory]::CreateDirectory((Join-Path $NewRoot $rel))
-    Copy-Item -LiteralPath (Join-Path $src '*') -Destination (Join-Path $NewRoot $rel) -Recurse -Force
+    Copy-Item -Path (Join-Path $src '*') -Destination (Join-Path $NewRoot $rel) -Recurse -Force
   }
 }
 if($IncludeLogs -and (Test-Path -LiteralPath (Join-Path $PreviousRoot 'Logs'))){
-  Copy-Item -LiteralPath (Join-Path $PreviousRoot 'Logs\*') -Destination (Join-Path $NewRoot 'Logs') -Recurse -Force
+  Copy-Item -Path (Join-Path $PreviousRoot 'Logs\*') -Destination (Join-Path $NewRoot 'Logs') -Recurse -Force
 }
 
 Write-Host ''
