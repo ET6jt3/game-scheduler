@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,8 @@ type Spec struct {
 	Dir                 string        // working directory (optional)
 	Env                 []string      // extra environment, appended to os.Environ()
 	Timeout             time.Duration // 0 means no timeout
+	CompletionMarker    string        // optional stdout marker proving managed work completed
+	CompletionGrace     time.Duration // grace period for the launcher to exit after the marker
 }
 
 // CommandLine renders the spec for logging/storage. It is informational only
@@ -92,7 +95,14 @@ func Run(ctx context.Context, spec Spec) Result {
 	var stdout, stderr cappedBuffer
 	stdout.limit = maxCapture
 	stderr.limit = maxCapture
-	cmd.Stdout = &stdout
+	var completion <-chan struct{}
+	if spec.CompletionMarker != "" {
+		hit := make(chan struct{})
+		cmd.Stdout = &markerBuffer{dst: &stdout, marker: spec.CompletionMarker, hit: hit}
+		completion = hit
+	} else {
+		cmd.Stdout = &stdout
+	}
 	cmd.Stderr = &stderr
 
 	err := cmd.Start()
@@ -110,7 +120,42 @@ func Run(ctx context.Context, spec Spec) Result {
 			_ = cmd.Wait()
 			err = fmt.Errorf("cannot track helper process tree: %w", jerr)
 		} else {
-			err = cmd.Wait()
+			waitCh := make(chan error, 1)
+			go func() { waitCh <- cmd.Wait() }()
+			markerSuccess := false
+			if completion == nil {
+				err = <-waitCh
+			} else {
+				select {
+				case err = <-waitCh:
+				case <-completion:
+					markerSuccess = true
+					grace := spec.CompletionGrace
+					if grace <= 0 {
+						grace = 5 * time.Second
+					}
+					timer := time.NewTimer(grace)
+					select {
+					case err = <-waitCh:
+						if !timer.Stop() {
+							<-timer.C
+						}
+					case <-timer.C:
+						_ = killProcessTree(cmd.Process)
+						err = <-waitCh
+					case <-runCtx.Done():
+						_ = killProcessTree(cmd.Process)
+						err = <-waitCh
+					}
+				}
+			}
+			if markerSuccess {
+				res.EndTime = time.Now()
+				res.Stdout = stdout.String()
+				res.Stderr = stderr.String()
+				res.ExitCode = 0
+				return res
+			}
 			if spec.RequireCompleteTree && remaining != nil {
 				alive, checkErr := remaining()
 				if checkErr != nil {
@@ -186,4 +231,36 @@ func KillProcessTree(p *os.Process) error {
 // the release func the caller must invoke once the child is done.
 func AssignJob(p *os.Process) (release func(), err error) {
 	return assignJob(p)
+}
+
+
+// markerBuffer forwards stdout while detecting a completion marker across
+// arbitrary write boundaries. The marker is data, never shell syntax.
+type markerBuffer struct {
+	dst    *cappedBuffer
+	marker string
+	hit    chan struct{}
+	once   sync.Once
+	tail   string
+}
+
+func (m *markerBuffer) Write(p []byte) (int, error) {
+	n, err := m.dst.Write(p)
+	if m.marker == "" {
+		return n, err
+	}
+	combined := m.tail + string(p)
+	if strings.Contains(combined, m.marker) {
+		m.once.Do(func() { close(m.hit) })
+	}
+	keep := len(m.marker) - 1
+	if keep < 0 {
+		keep = 0
+	}
+	if len(combined) > keep {
+		m.tail = combined[len(combined)-keep:]
+	} else {
+		m.tail = combined
+	}
+	return n, err
 }
