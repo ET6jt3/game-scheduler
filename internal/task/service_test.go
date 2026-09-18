@@ -521,7 +521,6 @@ func TestRunDoesNotRetryUnlaunchedProcess(t *testing.T) {
 	}
 }
 
-
 func TestChainExecutionPolicyWaitsForNaturalCompletionByDefault(t *testing.T) {
 	task := store.Task{TimeoutSec: 900, Params: `{}`}
 	spec := runner.Spec{Timeout: 15 * time.Minute}
