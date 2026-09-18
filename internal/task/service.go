@@ -554,9 +554,6 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	if err != nil {
 		return s.finishWithError(exec, fmt.Errorf("load task: %w", err))
 	}
-	if exec.Trigger == "chain" && t.TimeoutSec <= 0 {
-		t.TimeoutSec = 3600
-	}
 	// executor "auto" re-resolves HERE, at fire time: native runs only
 	// when its prerequisites still hold; anything else (including params
 	// that no longer decode) falls back to the external adapter path.
