@@ -806,7 +806,6 @@ func (s *Service) ExecutionActive(id int64) bool {
 	return ok
 }
 
-
 func applyChainExecutionPolicy(trigger string, t store.Task, spec *runner.Spec) {
 	if trigger != "chain" || spec == nil {
 		return
