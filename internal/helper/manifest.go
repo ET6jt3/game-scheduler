@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/xiabee/game-scheduler/internal/game"
 	"github.com/xiabee/game-scheduler/internal/game/cmdutil"
@@ -39,6 +40,10 @@ type Definition struct {
 		Foreground bool `json:"foreground"`
 		WorkingDir bool `json:"working_dir"`
 	} `json:"requirements"`
+	Completion struct {
+		Marker   string `json:"marker,omitempty"`
+		GraceSec int    `json:"grace_sec,omitempty"`
+	} `json:"completion,omitempty"`
 }
 type Field struct {
 	Type     string   `json:"type"`
@@ -319,7 +324,14 @@ func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, erro
 	if e != nil {
 		return runner.Spec{}, e
 	}
-	return cmdutil.BaseSpec(g, t, p, args), nil
+	spec := cmdutil.BaseSpec(g, t, p, args)
+	if d.Completion.Marker != "" {
+		spec.CompletionMarker = d.Completion.Marker
+		if d.Completion.GraceSec > 0 {
+			spec.CompletionGrace = time.Duration(d.Completion.GraceSec) * time.Second
+		}
+	}
+	return spec, nil
 }
 func (d *Definition) TaskSchema() []game.TaskTypeInfo {
 	out := []game.TaskTypeInfo{}
