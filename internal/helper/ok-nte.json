@@ -12,5 +12,9 @@
     },
     "raw": {"raw_args": true}
   },
-  "requirements": {"foreground": true}
+  "requirements": {"foreground": true},
+  "completion": {
+    "marker": "FINISHED [ok-nte]: Process COMPLETED.",
+    "grace_sec": 5
+  }
 }
