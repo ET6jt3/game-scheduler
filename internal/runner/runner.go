@@ -233,7 +233,6 @@ func AssignJob(p *os.Process) (release func(), err error) {
 	return assignJob(p)
 }
 
-
 // markerBuffer forwards stdout while detecting a completion marker across
 // arbitrary write boundaries. The marker is data, never shell syntax.
 type markerBuffer struct {
