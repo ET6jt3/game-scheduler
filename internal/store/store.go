@@ -34,6 +34,14 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := s.migrateHelpers(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := s.migrateChains(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -953,6 +961,7 @@ func (s *Store) PruneExecutions(olderThan time.Time) (int64, error) {
 	res, err := s.db.Exec(`
 DELETE FROM executions WHERE
   status NOT IN ('pending','running') AND
+  id NOT IN (SELECT execution_id FROM chain_execution_links) AND
   created_at < ? AND
   id NOT IN (SELECT id FROM executions ORDER BY id DESC LIMIT ?)`,
 		olderThan, keepRecentExecutions)

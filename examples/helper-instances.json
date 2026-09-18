@@ -1,0 +1,6 @@
+[
+ {"id":"nte-managed","helper_id":"ok-nte","name":"NTE Managed","location_mode":"managed","executable":"${HELPERS}/ok-nte/ok-nte.exe","working_dir":"${HELPERS}/ok-nte","enabled":true},
+ {"id":"nte-main","helper_id":"ok-nte","name":"NTE External","location_mode":"external","executable":"D:/GameHelpers/ok-nte/ok-nte.exe","working_dir":"D:/GameHelpers/ok-nte","enabled":true},
+ {"id":"bgi-main","helper_id":"bettergi","name":"BetterGI External","location_mode":"external","executable":"D:/BGI/Main/BetterGI.exe","working_dir":"D:/BGI/Main","enabled":true},
+ {"id":"march7th-main","helper_id":"march7th","name":"March7th External Python","location_mode":"external","executable":"D:/Automation/M7A/main.py","working_dir":"D:/Automation/M7A","runtime_path":"E:/Runtimes/Python312/python.exe","enabled":true}
+]

@@ -16,6 +16,9 @@ import (
 // exist there, orphan control is left to the platform (POSIX process groups
 // could fill this role later).
 func assignJob(*os.Process) (func(), error) { return func() {}, nil }
+func trackJob(*os.Process) (func(), func() (bool, error), error) {
+	return func() {}, func() (bool, error) { return false, nil }, nil
+}
 
 func killProcessTree(p *os.Process) error {
 	if p == nil {

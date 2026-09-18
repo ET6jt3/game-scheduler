@@ -10,6 +10,7 @@ package game
 import (
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/xiabee/game-scheduler/internal/runner"
 	"github.com/xiabee/game-scheduler/internal/store"
@@ -30,7 +31,8 @@ type Adapter interface {
 
 // Registry maps adapter keys to implementations.
 type Registry struct {
-	m map[string]Adapter
+	mu sync.RWMutex
+	m  map[string]Adapter
 }
 
 // NewRegistry builds a registry from the given adapters.
@@ -44,6 +46,8 @@ func NewRegistry(adapters ...Adapter) *Registry {
 
 // Get returns the adapter for key.
 func (r *Registry) Get(key string) (Adapter, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	a, ok := r.m[key]
 	if !ok {
 		return nil, fmt.Errorf("game: no adapter registered for %q", key)
@@ -53,6 +57,8 @@ func (r *Registry) Get(key string) (Adapter, error) {
 
 // Keys returns the registered adapter keys, sorted.
 func (r *Registry) Keys() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	keys := make([]string, 0, len(r.m))
 	for k := range r.m {
 		keys = append(keys, k)
@@ -73,15 +79,34 @@ type AdapterInfo struct {
 // dashboard's add-game / add-task forms. Adapters without a UI schema fall back
 // to bare type names.
 func (r *Registry) Meta() []AdapterInfo {
-	out := make([]AdapterInfo, 0, len(r.m))
+	out := []AdapterInfo{}
 	for _, k := range r.Keys() {
+		a, err := r.Get(k)
+		if err != nil {
+			continue
+		}
 		tts := Schema(k)
+		if provider, ok := a.(interface{ TaskSchema() []TaskTypeInfo }); ok {
+			tts = provider.TaskSchema()
+		}
 		if tts == nil {
-			for _, t := range r.m[k].TaskTypes() {
+			for _, t := range a.TaskTypes() {
 				tts = append(tts, TaskTypeInfo{Type: t, Label: t, Fields: []Field{}})
 			}
 		}
 		out = append(out, AdapterInfo{Key: k, TaskTypes: tts})
 	}
 	return out
+}
+
+// Replace installs an atomic manifest snapshot without disturbing built-in adapters.
+func (r *Registry) Replace(remove []string, adapters []Adapter) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, k := range remove {
+		delete(r.m, k)
+	}
+	for _, a := range adapters {
+		r.m[a.Key()] = a
+	}
 }

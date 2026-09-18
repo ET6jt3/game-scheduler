@@ -23,6 +23,15 @@ func (s *Server) discoverScan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.svc != nil && s.svc.Helpers != nil {
+		res, err := s.svc.Helpers.Discover(r.Context(), req.Paths, req.MaxDepth)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		writeJSON(w, 200, res)
+		return
+	}
 	res := discover.Scan(r.Context(), discover.Options{Paths: req.Paths, MaxDepth: req.MaxDepth})
 	writeJSON(w, http.StatusOK, res)
 }

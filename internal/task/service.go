@@ -26,6 +26,8 @@ import (
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
+	"github.com/xiabee/game-scheduler/internal/game/cmdutil"
+	"github.com/xiabee/game-scheduler/internal/helper"
 	"github.com/xiabee/game-scheduler/internal/runner"
 	"github.com/xiabee/game-scheduler/internal/shellcmd"
 	"github.com/xiabee/game-scheduler/internal/store"
@@ -49,21 +51,23 @@ const waitDelayAfterKill = 2 * time.Second
 
 // Service runs tasks and records executions.
 type Service struct {
-	store *store.Store
-	reg   *game.Registry
-	cfg   config.Config
-	log   *slog.Logger
-	bus   *events.Bus
+	Helpers *helper.Hub
+	store   *store.Store
+	reg     *game.Registry
+	cfg     config.Config
+	log     *slog.Logger
+	bus     *events.Bus
 
 	sem chan struct{} // bounded run slots; cap == cfg.MaxConcurrent
 
 	notify NotifyFunc // optional operator alert hook
 
-	mu      sync.Mutex
-	running map[int64]context.CancelFunc // execID -> cancel
-	active  map[int64]int                // taskID -> count of pending/running execs
-	wg      sync.WaitGroup               // tracks in-flight workers
-	closing bool                         // set by Shutdown; rejects new Enqueue
+	mu         sync.Mutex
+	running    map[int64]context.CancelFunc // execID -> cancel
+	active     map[int64]int                // taskID -> count of pending/running execs
+	wg         sync.WaitGroup               // tracks in-flight workers
+	chainOwner int64                        // reserves the shared desktop for one complete chain
+	closing    bool                         // set by Shutdown; rejects new Enqueue
 }
 
 // SetNotify installs an operator-alert hook, called when a task fails.
@@ -102,6 +106,14 @@ func NewService(s *store.Store, reg *game.Registry, cfg config.Config, bus *even
 // returned — this is how scheduled fires avoid stacking on top of a run that is
 // still going.
 func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfActive bool) (exec store.Execution, skipped bool, err error) {
+	return s.enqueue(taskID, trigger, planID, skipIfActive, 0, 0)
+}
+
+func (s *Service) EnqueueChain(taskID, runID int64, step int) (store.Execution, bool, error) {
+	return s.enqueue(taskID, "chain", nil, true, runID, step)
+}
+
+func (s *Service) enqueue(taskID int64, trigger string, planID *int64, skipIfActive bool, runID int64, step int) (exec store.Execution, skipped bool, err error) {
 	if _, err = s.store.GetTask(taskID); err != nil {
 		return store.Execution{}, false, err
 	}
@@ -111,13 +123,20 @@ func (s *Service) Enqueue(taskID int64, trigger string, planID *int64, skipIfAct
 		s.mu.Unlock()
 		return store.Execution{}, false, errShuttingDown
 	}
+	if (s.chainOwner != 0 && s.chainOwner != runID) || (runID != 0 && s.chainOwner != runID) {
+		s.mu.Unlock()
+		return store.Execution{}, false, fmt.Errorf("a daily chain owns the runner; wait or pause it first")
+	}
 	if skipIfActive && s.active[taskID] > 0 {
 		s.mu.Unlock()
 		return store.Execution{}, true, nil
 	}
-	exec, err = s.store.CreateExecution(store.Execution{
-		TaskID: taskID, PlanID: planID, Trigger: trigger, Status: store.StatusPending,
-	})
+	pending := store.Execution{TaskID: taskID, PlanID: planID, Trigger: trigger, Status: store.StatusPending}
+	if runID != 0 {
+		exec, err = s.store.CreateChainExecution(runID, step, pending)
+	} else {
+		exec, err = s.store.CreateExecution(pending)
+	}
 	if err != nil {
 		s.mu.Unlock()
 		return store.Execution{}, false, err
@@ -278,21 +297,24 @@ func (s *Service) markCancelledBeforeStart(execID int64) {
 // without launching anything. It is the quickest way to confirm a game is wired
 // up correctly after installing its tool.
 type Preflight struct {
-	TaskID           int64            `json:"task_id"`
-	TaskName         string           `json:"task_name"`
-	GameID           string           `json:"game_id"`
-	Adapter          string           `json:"adapter"`
-	Command          string           `json:"command"`
-	Executable       string           `json:"executable"`
-	ExecutableExists bool             `json:"executable_exists"`
-	WorkingDir       string           `json:"working_dir"`
-	WorkingDirExists bool             `json:"working_dir_exists"`
-	Checks           []PreflightCheck `json:"checks"`
-	Missing          []string         `json:"missing"`
-	ValidationError  string           `json:"validation_error,omitempty"`
-	BuildError       string           `json:"build_error,omitempty"`
-	Resolution       string           `json:"resolution,omitempty"` // auto executor: which branch was picked and why
-	Ready            bool             `json:"ready"`
+	HelperInstance   *store.HelperInstance `json:"helper_instance,omitempty"`
+	Args             []string              `json:"args"`
+	Warnings         []string              `json:"warnings,omitempty"`
+	TaskID           int64                 `json:"task_id"`
+	TaskName         string                `json:"task_name"`
+	GameID           string                `json:"game_id"`
+	Adapter          string                `json:"adapter"`
+	Command          string                `json:"command"`
+	Executable       string                `json:"executable"`
+	ExecutableExists bool                  `json:"executable_exists"`
+	WorkingDir       string                `json:"working_dir"`
+	WorkingDirExists bool                  `json:"working_dir_exists"`
+	Checks           []PreflightCheck      `json:"checks"`
+	Missing          []string              `json:"missing"`
+	ValidationError  string                `json:"validation_error,omitempty"`
+	BuildError       string                `json:"build_error,omitempty"`
+	Resolution       string                `json:"resolution,omitempty"` // auto executor: which branch was picked and why
+	Ready            bool                  `json:"ready"`
 }
 
 // PreflightCheck is one filesystem prerequisite checked before a task is run.
@@ -355,7 +377,19 @@ func (s *Service) externalPreflight(t store.Task) (Preflight, error) {
 	if err != nil {
 		return Preflight{}, err
 	}
-	pf := Preflight{TaskID: t.ID, TaskName: t.Name, GameID: g.ID, Adapter: g.Adapter}
+	return s.preflightExternal(g, t)
+}
+func (s *Service) preflightExternal(g store.Game, t store.Task) (Preflight, error) {
+	var instance *store.HelperInstance
+	var err error
+	if s.Helpers != nil {
+		g, t, instance, err = s.Helpers.Resolve(g, t)
+	}
+	pf := Preflight{TaskID: t.ID, TaskName: t.Name, GameID: g.ID, Adapter: g.Adapter, HelperInstance: instance}
+	if err != nil {
+		pf.ValidationError = err.Error()
+		return pf, nil
+	}
 
 	adapter, err := s.reg.Get(g.Adapter)
 	if err != nil {
@@ -370,6 +404,10 @@ func (s *Service) externalPreflight(t store.Task) (Preflight, error) {
 		pf.BuildError = berr.Error()
 		return pf, nil
 	}
+	return s.checkExternalSpec(pf, g, t, spec), nil
+}
+func (s *Service) checkExternalSpec(pf Preflight, g store.Game, t store.Task, spec runner.Spec) Preflight {
+	pf.Args = append([]string{}, spec.Args...)
 	pf.Command = spec.CommandLine()
 	pf.Executable = spec.Path
 	pf.ExecutableExists = executableExists(spec.Path)
@@ -385,8 +423,11 @@ func (s *Service) externalPreflight(t store.Task) (Preflight, error) {
 	}
 	pf.addExtraConfigDirChecks(g)
 	pf.addPythonEntryChecks(g, t)
+	if s.Helpers != nil {
+		s.addHelperChecks(&pf, g, t, spec)
+	}
 	pf.Ready = pf.ValidationError == "" && pf.BuildError == "" && len(pf.Missing) == 0
-	return pf, nil
+	return pf
 }
 
 func (pf *Preflight) addExecutableCheck(key, path string) {
@@ -453,6 +494,11 @@ func (pf *Preflight) addPythonEntryChecks(g store.Game, t store.Task) {
 		return
 	}
 	dir := strings.TrimSpace(stringValue(ec[dirKey]))
+	if params, e := t.ParamsMap(); e == nil {
+		if override := stringValue(params["working_dir"]); override != "" {
+			dir = override
+		}
+	}
 	entry := strings.TrimSpace(stringValue(ec[entryKey]))
 	if entry == "" {
 		entry = defEntry
@@ -542,6 +588,13 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 	if err != nil {
 		return s.finishWithError(exec, fmt.Errorf("load game: %w", err))
 	}
+	var instance *store.HelperInstance
+	if s.Helpers != nil {
+		g, t, instance, err = s.Helpers.Resolve(g, t)
+		if err != nil {
+			return s.finishWithError(exec, err)
+		}
+	}
 	adapter, err := s.reg.Get(g.Adapter)
 	if err != nil {
 		return s.finishWithError(exec, err)
@@ -554,6 +607,24 @@ func (s *Service) execute(ctx context.Context, execID int64) error {
 		return s.finishWithError(exec, fmt.Errorf("build command: %w", err))
 	}
 
+	// Daily chains default to waiting for the helper's natural completion.
+	// Existing per-task timeouts still apply to manual/cron runs. Operators may
+	// explicitly opt a chain step into the hard timeout with
+	// params.chain_hard_timeout=true.
+	applyChainExecutionPolicy(exec.Trigger, t, &spec)
+
+	if s.Helpers != nil {
+		pf := s.checkExternalSpec(Preflight{TaskID: t.ID, TaskName: t.Name, GameID: g.ID, Adapter: g.Adapter, HelperInstance: instance}, g, t, spec)
+		if !pf.Ready {
+			return s.finishWithError(exec, fmt.Errorf("preflight failed: %s %s %v", pf.ValidationError, pf.BuildError, pf.Missing))
+		}
+		diag := map[string]any{"executable": spec.Path, "working_dir": spec.Dir, "args": spec.Args, "helper_instance": instance}
+		if err := s.store.SaveExecutionDiagnostics(execID, diag); err != nil {
+			return s.finishWithError(exec, err)
+		}
+	}
+
+	spec.RequireCompleteTree = exec.Trigger == "chain"
 	exec.Command = spec.CommandLine()
 	exec.Status = store.StatusRunning
 	start := time.Now().UTC()
@@ -703,4 +774,44 @@ func renderTemplate(tpl string, data any) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// ReserveChain waits for all older workers, then excludes manual and cron runs.
+func (s *Service) ReserveChain(id int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing || (s.chainOwner != 0 && s.chainOwner != id) {
+		return false
+	}
+	if s.chainOwner == id {
+		return true
+	}
+	if len(s.running) != 0 {
+		return false
+	}
+	s.chainOwner = id
+	return true
+}
+func (s *Service) ReleaseChain(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.chainOwner == id && len(s.running) == 0 {
+		s.chainOwner = 0
+	}
+}
+func (s *Service) ExecutionActive(id int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.running[id]
+	return ok
+}
+
+func applyChainExecutionPolicy(trigger string, t store.Task, spec *runner.Spec) {
+	if trigger != "chain" || spec == nil {
+		return
+	}
+	params, _ := t.ParamsMap()
+	if !cmdutil.Bool(params, "chain_hard_timeout", false) {
+		spec.Timeout = 0
+	}
 }

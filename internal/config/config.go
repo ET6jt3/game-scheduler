@@ -16,6 +16,11 @@ import (
 
 // Config holds server-wide settings.
 type Config struct {
+	Root         string          `json:"-"`
+	HelpersDir   string          `json:"helpers_dir"`
+	RuntimeDir   string          `json:"runtime_dir"`
+	ManifestDirs []string        `json:"manifest_dirs"`
+	Discovery    DiscoveryConfig `json:"discovery"`
 	// Addr is the HTTP listen address for the REST API.
 	Addr string `json:"addr"`
 	// DataDir is the base directory for the SQLite DB, logs and screenshots.
@@ -193,6 +198,9 @@ func Load(path string) (Config, error) {
 	}
 	if strings.TrimSpace(cfg.DBPath) == "" {
 		cfg.DBPath = filepath.Join(cfg.DataDir, "scheduler.db")
+		if strings.Contains(cfg.DataDir, "${") {
+			cfg.DBPath = strings.TrimRight(cfg.DataDir, `/\`) + "/scheduler.db"
+		}
 	}
 	// The env branch rejects an unknown policy with a warning, but the config
 	// FILE path had no validation at all: a typo like "Pause" or " pause "

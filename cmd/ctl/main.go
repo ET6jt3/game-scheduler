@@ -119,6 +119,26 @@ func main() {
 
 	var err error
 	switch resource {
+	case "helpers":
+		if action == "preflight" {
+			body := []byte(`{}`)
+			if *data != "" {
+				body, err = readData(*data)
+			}
+			if err == nil {
+				err = c.do("POST", "/api/helpers/"+url.PathEscape(id)+"/preflight", body)
+			}
+		} else {
+			err = c.crud("/api/helpers", action, id, *data, q)
+		}
+	case "helper-definitions":
+		if action == "reload" {
+			err = c.do("POST", "/api/helper-definitions/reload", nil)
+		} else if action == "list" || action == "" {
+			err = c.do("GET", "/api/helper-definitions", nil)
+		} else {
+			err = fmt.Errorf("unknown action %q", action)
+		}
 	case "health":
 		err = c.do("GET", "/healthz", nil)
 	case "dashboard":

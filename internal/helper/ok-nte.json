@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "ok-nte",
+  "display_name": "ok-nte",
+  "game_name": "Neverness to Everness",
+  "discovery": {"executable_names": ["ok-nte.exe"], "directory_hints": ["ok-nte"]},
+  "launch": {"default_executable": "${HELPERS}/ok-nte/ok-nte.exe", "working_dir": "${EXECUTABLE_DIR}"},
+  "task_types": {
+    "task": {
+      "fields": {"task_index": {"type": "integer", "required": true, "min": 1}, "exit": {"type": "boolean", "default": true}},
+      "args": ["-t", "{{task_index}}", {"if": "exit", "value": "-e"}]
+    },
+    "raw": {"raw_args": true}
+  },
+  "requirements": {"foreground": true},
+  "completion": {
+    "marker": "FINISHED [ok-nte]: Process COMPLETED.",
+    "grace_sec": 5
+  }
+}

@@ -40,6 +40,9 @@ func TestHelperProcess(t *testing.T) {
 	case "sleep":
 		d, _ := time.ParseDuration(args[1])
 		time.Sleep(d)
+	case "marker_hold":
+		os.Stdout.WriteString("before\nFINISHED [ok-nte]: Process COMPLETED.\nafter\n")
+		time.Sleep(30 * time.Second)
 	case "spawn_exit", "spawn_hold":
 		// Spawn a long-lived grandchild, report its PID on stdout, then either
 		// exit right away (leaving the grandchild orphaned: the dead-root case
@@ -146,5 +149,22 @@ func TestCommandLineQuoting(t *testing.T) {
 	s := Spec{Path: "tool.exe", Args: []string{"--name", "has space"}}
 	if got := s.CommandLine(); !strings.Contains(got, `"has space"`) {
 		t.Errorf("CommandLine=%q", got)
+	}
+}
+
+func TestRunCompletionMarkerEndsWrapperWait(t *testing.T) {
+	spec := helperSpec("marker_hold")
+	spec.CompletionMarker = "FINISHED [ok-nte]: Process COMPLETED."
+	spec.CompletionGrace = 100 * time.Millisecond
+	start := time.Now()
+	res := Run(context.Background(), spec)
+	if res.Err != nil || res.ExitCode != 0 {
+		t.Fatalf("marker completion should be success: exit=%d err=%v", res.ExitCode, res.Err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("marker completion waited for wrapper instead of finishing: %s", time.Since(start))
+	}
+	if !strings.Contains(res.Stdout, spec.CompletionMarker) {
+		t.Fatalf("stdout lost completion marker: %q", res.Stdout)
 	}
 }
