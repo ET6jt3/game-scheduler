@@ -35,6 +35,17 @@ try{
  if($first -eq $second -or !(Test-Path (Join-Path $second 'App\server.exe'))){throw 'Repeated build did not choose a new output'}
  if((Get-FileHash (Join-Path $first 'App\server.exe')).Hash -ne $before -or !(Test-Path (Join-Path $first 'Data\preserve.txt'))){throw 'Existing package was modified'}
  Write-Host 'PASS: two builds without system Go; existing package preserved'
+ # A newly downloaded/extracted package can import all persistent state from
+ # the previous portable folder without copying old binaries.
+ Set-Content -LiteralPath (Join-Path $first 'Config\config.json') -Value '{"addr":"127.0.0.1:18080","data_dir":"${ROOT}/../Data","db_path":"${DATA}/scheduler.db"}' -Encoding UTF8
+ Set-Content -LiteralPath (Join-Path $first 'Helpers\managed-marker.txt') -Value 'managed helper state'
+ Set-Content -LiteralPath (Join-Path $first 'Runtime\runtime-marker.txt') -Value 'runtime state'
+ & (Join-Path $second 'App\Migrate-From-Previous.ps1') -PreviousRoot $first
+ if(!(Test-Path (Join-Path $second 'Data\preserve.txt'))){throw 'Migration did not copy Data'}
+ if((Get-Content (Join-Path $second 'Config\config.json') -Raw) -notmatch '18080'){throw 'Migration did not copy config.json'}
+ if(!(Test-Path (Join-Path $second 'Helpers\managed-marker.txt')) -or !(Test-Path (Join-Path $second 'Runtime\runtime-marker.txt'))){throw 'Migration did not copy managed helper/runtime state'}
+ if(!(Get-ChildItem (Join-Path $second 'Backups') -Directory | Where-Object Name -like 'pre-migration-*')){throw 'Migration did not create safety backup'}
+ Write-Host 'PASS: previous portable state migrates into a newly extracted package'
  $goEnv=(& $bootstrap -GoArgs @('env','-json','GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOENV','GOTOOLCHAIN','GOTELEMETRY','GOTELEMETRYDIR')) -join "`n" | ConvertFrom-Json
  foreach($key in @('GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOTELEMETRYDIR')){
   if(!$goEnv.$key.StartsWith((Join-Path $repoRoot 'Toolchain'),[StringComparison]::OrdinalIgnoreCase)){throw "$key escaped repository: $($goEnv.$key)"}
