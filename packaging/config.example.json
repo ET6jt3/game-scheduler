@@ -12,7 +12,7 @@
   "mem_threshold": 90,
   "monitor_interval_sec": 3,
   "overload_policy": "alert",
-  "execution_retention_days": 30,
+  "execution_retention_days": 0,
   "native_controller_path": "",
   "native_allow_input": false,
   "discovery": {"roots": ["${HELPERS}"], "scan_all_local_drives": false, "max_depth": 4}
