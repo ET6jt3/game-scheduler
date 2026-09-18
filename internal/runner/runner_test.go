@@ -152,7 +152,6 @@ func TestCommandLineQuoting(t *testing.T) {
 	}
 }
 
-
 func TestRunCompletionMarkerEndsWrapperWait(t *testing.T) {
 	spec := helperSpec("marker_hold")
 	spec.CompletionMarker = "FINISHED [ok-nte]: Process COMPLETED."
