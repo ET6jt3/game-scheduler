@@ -84,8 +84,8 @@ def main():
                 api('/api/helpers','POST',{'id':identity,'helper_id':'ok-nte','name':identity,'location_mode':mode,'executable':path,'enabled':True})
                 check(preflight(identity)['ready'],identity+' preflight')
             check(preflight('external')['executable']==str(fixture),'exact external path')
-            stable_nte_args=['-t','DailyRoutineTask','-e','-h']
-            check(preflight('external','task',{'task_index':2,'exit':True})['args']==stable_nte_args,'NTE legacy params normalize to named headless lifecycle')
+            stable_nte_args=['-t','2','-e','--headless']
+            check(preflight('external','task',{'task_index':2,'exit':True})['args']==stable_nte_args,'NTE legacy params normalize to packaged headless lifecycle')
             check(preflight('external','task',{'task_index':2,'exit':False})['args']==stable_nte_args,'NTE legacy exit flag cannot disable lifecycle exit')
             check(preflight('external','task',{'task_index':0})['args']==stable_nte_args,'NTE legacy task index cannot select the wrong task')
             api('/api/games','POST',{'id':'smoke','name':'Smoke','adapter':'ok-nte','enabled':True})
