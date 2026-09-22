@@ -177,7 +177,7 @@ func TestBuiltInNTEIgnoresPreservedManifestOverride(t *testing.T) {
 		t.Fatalf("stale manifest replaced built-in: %+v", d)
 	}
 	args, e := d.Arguments("task", map[string]any{"task_index": float64(2)})
-	if e != nil || !reflect.DeepEqual(args, []string{"-t", "DailyRoutineTask", "-e", "-h"}) {
+	if e != nil || !reflect.DeepEqual(args, []string{"-t", "2", "-e", "--headless"}) {
 		t.Fatalf("built-in args=%v err=%v", args, e)
 	}
 }
