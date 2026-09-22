@@ -10,6 +10,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/store"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -145,5 +146,38 @@ func TestManifestSymlinkEscape(t *testing.T) {
 	}
 	if e := h.Reload(); e == nil {
 		t.Fatal("escape accepted")
+	}
+}
+
+func TestBuiltInNTEIgnoresPreservedManifestOverride(t *testing.T) {
+	h, _ := testHub(t)
+	dir := filepath.Join(h.Paths.Root, "Config", "helpers")
+	if e := os.MkdirAll(dir, 0755); e != nil {
+		t.Fatal(e)
+	}
+	stale := []byte(`{
+	  "schema_version":1,
+	  "id":"ok-nte",
+	  "display_name":"stale",
+	  "discovery":{"executable_names":["ok-nte.exe"]},
+	  "launch":{"default_executable":"stale.exe"},
+	  "task_types":{"task":{"fields":{},"args":["--stale"]}}
+	}`)
+	if e := os.WriteFile(filepath.Join(dir, "ok-nte.json"), stale, 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := h.Reload(); e != nil {
+		t.Fatal(e)
+	}
+	d, e := h.Definition("ok-nte")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if d.DisplayName != "ok-nte" || d.Launch.Worker.Entry != "main.py" || d.Launch.Worker.DefaultTimeoutSec != 21600 {
+		t.Fatalf("stale manifest replaced built-in: %+v", d)
+	}
+	args, e := d.Arguments("task", map[string]any{"task_index": float64(2)})
+	if e != nil || !reflect.DeepEqual(args, []string{"-t", "DailyRoutineTask", "-e", "-h"}) {
+		t.Fatalf("built-in args=%v err=%v", args, e)
 	}
 }
