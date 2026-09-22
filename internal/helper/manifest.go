@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -31,9 +32,10 @@ type Definition struct {
 		DirectoryHints  []string `json:"directory_hints"`
 	} `json:"discovery"`
 	Launch struct {
-		DefaultExecutable string `json:"default_executable"`
-		WorkingDir        string `json:"working_dir"`
-		AllowPATH         bool   `json:"allow_path_lookup"`
+		DefaultExecutable string       `json:"default_executable"`
+		WorkingDir        string       `json:"working_dir"`
+		AllowPATH         bool         `json:"allow_path_lookup"`
+		Worker            WorkerLaunch `json:"worker,omitempty"`
 	} `json:"launch"`
 	TaskTypesMap map[string]TaskType `json:"task_types"`
 	Requirements struct {
@@ -45,6 +47,13 @@ type Definition struct {
 		GraceSec int    `json:"grace_sec,omitempty"`
 	} `json:"completion,omitempty"`
 }
+type WorkerLaunch struct {
+	Executable string   `json:"executable,omitempty"`
+	WorkingDir string   `json:"working_dir,omitempty"`
+	Entry      string   `json:"entry,omitempty"`
+	TaskTypes  []string `json:"task_types,omitempty"`
+}
+
 type Field struct {
 	Type     string   `json:"type"`
 	Required bool     `json:"required"`
@@ -106,6 +115,22 @@ func (d *Definition) validate() error {
 			return fmt.Errorf("discovery names must be basenames")
 		}
 	}
+	w := d.Launch.Worker
+	if w.Executable != "" || w.WorkingDir != "" || w.Entry != "" || len(w.TaskTypes) > 0 {
+		if !validWorkerRelativePath(w.Executable) || !validWorkerRelativePath(w.WorkingDir) || !validWorkerRelativePath(w.Entry) || len(w.TaskTypes) == 0 {
+			return fmt.Errorf("launch.worker requires relative executable, working_dir, entry and task_types")
+		}
+		seen := map[string]bool{}
+		for _, kind := range w.TaskTypes {
+			if _, ok := d.TaskTypesMap[kind]; !ok {
+				return fmt.Errorf("launch.worker references unknown task type %q", kind)
+			}
+			if seen[kind] {
+				return fmt.Errorf("launch.worker duplicates task type %q", kind)
+			}
+			seen[kind] = true
+		}
+	}
 	for name, t := range d.TaskTypesMap {
 		if !identifier.MatchString(name) {
 			return fmt.Errorf("invalid task type")
@@ -161,6 +186,19 @@ func (d *Definition) validate() error {
 	}
 	return nil
 }
+func validWorkerRelativePath(v string) bool {
+	v = strings.ReplaceAll(strings.TrimSpace(v), `\`, "/")
+	if v == "" || strings.HasPrefix(v, "/") || strings.IndexByte(v, 0) >= 0 || (len(v) >= 2 && v[1] == ':') {
+		return false
+	}
+	for _, part := range strings.Split(v, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 func validateTemplate(v string, fields map[string]Field) error {
 	for _, match := range placeholder.FindAllStringSubmatch(v, -1) {
 		f, ok := fields[match[1]]
@@ -315,6 +353,48 @@ func (d *Definition) TaskTypes() []string {
 	sort.Strings(out)
 	return out
 }
+func (d *Definition) workerEnabled(g store.Game, t store.Task, params map[string]any) bool {
+	w := d.Launch.Worker
+	if w.Executable == "" {
+		return false
+	}
+	if override, ok := params["exe"].(string); ok && strings.TrimSpace(override) != "" {
+		return false
+	}
+	enabledType := false
+	for _, kind := range w.TaskTypes {
+		if kind == t.Type {
+			enabledType = true
+			break
+		}
+	}
+	if !enabledType {
+		return false
+	}
+	base := filepath.Base(g.ToolPath)
+	for _, name := range d.Discovery.ExecutableNames {
+		if strings.EqualFold(base, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func workerJoin(root, rel string) string {
+	rel = strings.ReplaceAll(rel, `\`, "/")
+	return filepath.Join(root, filepath.FromSlash(rel))
+}
+
+// WorkerEntryPath reports the real worker entry file when this invocation uses
+// a manifest-declared worker instead of the visible/updater launcher.
+func (d *Definition) WorkerEntryPath(g store.Game, t store.Task, spec runner.Spec) (string, bool) {
+	p, e := t.ParamsMap()
+	if e != nil || !d.workerEnabled(g, t, p) || len(spec.Args) == 0 {
+		return "", false
+	}
+	return spec.Args[0], true
+}
+
 func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, error) {
 	p, e := t.ParamsMap()
 	if e != nil {
@@ -323,6 +403,18 @@ func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, erro
 	args, e := d.Arguments(t.Type, p)
 	if e != nil {
 		return runner.Spec{}, e
+	}
+	if d.workerEnabled(g, t, p) {
+		root := filepath.Dir(g.ToolPath)
+		workerDir := workerJoin(root, d.Launch.Worker.WorkingDir)
+		workerExe := workerJoin(root, d.Launch.Worker.Executable)
+		entry := workerJoin(workerDir, d.Launch.Worker.Entry)
+		return runner.Spec{
+			Path:    workerExe,
+			Args:    append([]string{entry}, args...),
+			Dir:     workerDir,
+			Timeout: cmdutil.Timeout(t),
+		}, nil
 	}
 	spec := cmdutil.BaseSpec(g, t, p, args)
 	if d.Completion.Marker != "" {

@@ -2,9 +2,12 @@ package helper
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/xiabee/game-scheduler/internal/store"
 )
 
 func TestNTEArguments(t *testing.T) {
@@ -34,6 +37,34 @@ func TestNTEArguments(t *testing.T) {
 		t.Fatal("non-string raw accepted")
 	}
 }
+func TestNTEWorkerCommand(t *testing.T) {
+	d, e := Parse(nte)
+	if e != nil {
+		t.Fatal(e)
+	}
+	root := t.TempDir()
+	launcher := filepath.Join(root, "ok-nte.exe")
+	g := store.Game{Adapter: "ok-nte", ToolPath: launcher, WorkingDir: root}
+	task := store.Task{Type: "task", Params: `{"task_index":2}`, TimeoutSec: 37}
+	spec, e := d.BuildCommand(g, task)
+	if e != nil {
+		t.Fatal(e)
+	}
+	workerDir := filepath.Join(root, "data", "apps", "ok-nte", "working")
+	workerExe := filepath.Join(root, "data", "apps", "ok-nte", "python", "python.exe")
+	entry := filepath.Join(workerDir, "main.py")
+	wantArgs := []string{entry, "-t", "2", "-e"}
+	if spec.Path != workerExe || spec.Dir != workerDir || !reflect.DeepEqual(spec.Args, wantArgs) || spec.Timeout.Seconds() != 37 || spec.CompletionMarker != "" {
+		t.Fatalf("worker spec=%+v", spec)
+	}
+
+	raw := store.Task{Type: "raw", Params: `{"raw_args":["--diagnose"]}`}
+	rawSpec, e := d.BuildCommand(g, raw)
+	if e != nil || rawSpec.Path != launcher || rawSpec.Dir != root || !reflect.DeepEqual(rawSpec.Args, []string{"--diagnose"}) {
+		t.Fatalf("raw spec=%+v err=%v", rawSpec, e)
+	}
+}
+
 func TestManifestValidationAndRepeated(t *testing.T) {
 	valid := `{"schema_version":1,"id":"future","display_name":"Future","task_types":{"daily":{"fields":{"profile":{"type":"enum","enum":["main","alt"],"required":true},"tags":{"type":"string","repeated":true},"count":{"type":"number","min":0}},"args":["--profile","{{profile}}",{"repeat":"tags","flag":"--tag"}]}}}`
 	d, e := Parse([]byte(valid))

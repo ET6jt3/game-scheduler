@@ -108,6 +108,50 @@ func TestHelperPreflightExecutionExactArgvDiagnostics(t *testing.T) {
 		t.Fatal(pf, e)
 	}
 }
+func TestNTEPackagedWorkerPreflight(t *testing.T) {
+	svc, st := helperService(t)
+	root := t.TempDir()
+	launcher := filepath.Join(root, "ok-nte.exe")
+	workerExe := filepath.Join(root, "data", "apps", "ok-nte", "python", "python.exe")
+	workerDir := filepath.Join(root, "data", "apps", "ok-nte", "working")
+	entry := filepath.Join(workerDir, "main.py")
+	if e := os.MkdirAll(filepath.Dir(workerExe), 0755); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.MkdirAll(workerDir, 0755); e != nil {
+		t.Fatal(e)
+	}
+	for _, path := range []string{launcher, workerExe, entry} {
+		if e := os.WriteFile(path, []byte("fixture"), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	h := store.HelperInstance{ID: "nte-worker", HelperID: "ok-nte", Name: "NTE", LocationMode: "external", Executable: launcher, WorkingDir: root, Enabled: true}
+	if e := st.SaveHelper(h, true); e != nil {
+		t.Fatal(e)
+	}
+	pf, e := svc.PreflightHelper(h.ID, "task", map[string]any{"task_index": float64(2)})
+	if e != nil || !pf.Ready || pf.Executable != workerExe || pf.WorkingDir != workerDir || !reflect.DeepEqual(pf.Args, []string{entry, "-t", "2", "-e"}) {
+		t.Fatalf("worker preflight %+v err=%v", pf, e)
+	}
+	foundEntry := false
+	for _, check := range pf.Checks {
+		if check.Key == "worker_entry" && check.Path == entry && check.Exists {
+			foundEntry = true
+		}
+	}
+	if !foundEntry {
+		t.Fatalf("worker entry check missing: %+v", pf.Checks)
+	}
+	if e := os.Remove(entry); e != nil {
+		t.Fatal(e)
+	}
+	pf, e = svc.PreflightHelper(h.ID, "task", map[string]any{"task_index": float64(2)})
+	if e != nil || pf.Ready || len(pf.Missing) == 0 {
+		t.Fatalf("missing worker entry was accepted: %+v err=%v", pf, e)
+	}
+}
+
 func TestMissingPathsAndOverrides(t *testing.T) {
 	svc, st := helperService(t)
 	exe, _ := os.Executable()

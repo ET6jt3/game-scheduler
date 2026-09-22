@@ -4,7 +4,16 @@
   "display_name": "ok-nte",
   "game_name": "Neverness to Everness",
   "discovery": {"executable_names": ["ok-nte.exe"], "directory_hints": ["ok-nte"]},
-  "launch": {"default_executable": "${HELPERS}/ok-nte/ok-nte.exe", "working_dir": "${EXECUTABLE_DIR}"},
+  "launch": {
+    "default_executable": "${HELPERS}/ok-nte/ok-nte.exe",
+    "working_dir": "${EXECUTABLE_DIR}",
+    "worker": {
+      "executable": "data/apps/ok-nte/python/python.exe",
+      "working_dir": "data/apps/ok-nte/working",
+      "entry": "main.py",
+      "task_types": ["task"]
+    }
+  },
   "task_types": {
     "task": {
       "fields": {"task_index": {"type": "integer", "required": true, "min": 1}, "exit": {"type": "boolean", "default": true}},

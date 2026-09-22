@@ -55,6 +55,10 @@ func (s *Service) addHelperChecks(pf *Preflight, g store.Game, t store.Task, spe
 		if d.Requirements.Foreground {
 			pf.Warnings = append(pf.Warnings, "Helper may require the interactive desktop; keep execution concurrency at 1.")
 		}
+		if entry, ok := d.WorkerEntryPath(g, t, spec); ok {
+			pf.addExecutableCheck("helper_launcher", g.ToolPath)
+			pf.addFileCheck("worker_entry", entry)
+		}
 		if tt, ok := d.TaskTypesMap[t.Type]; ok {
 			p, _ := t.ParamsMap()
 			for k, f := range tt.Fields {
