@@ -11,6 +11,7 @@
       "executable": "data/apps/ok-nte/python/python.exe",
       "working_dir": "data/apps/ok-nte/working",
       "entry": "main.py",
+      "bootstrap": "runtime-services",
       "task_types": ["task"],
       "default_timeout_sec": 21600,
       "preserve_timeout_in_chain": true
