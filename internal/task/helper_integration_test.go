@@ -12,6 +12,7 @@ import (
 	"github.com/xiabee/game-scheduler/internal/game/r1999"
 	"github.com/xiabee/game-scheduler/internal/game/wuwa"
 	"github.com/xiabee/game-scheduler/internal/helper"
+	"github.com/xiabee/game-scheduler/internal/runner"
 	"github.com/xiabee/game-scheduler/internal/store"
 	"os"
 	"path/filepath"
@@ -131,7 +132,7 @@ func TestNTEPackagedWorkerPreflight(t *testing.T) {
 		t.Fatal(e)
 	}
 	pf, e := svc.PreflightHelper(h.ID, "task", map[string]any{"task_index": float64(2)})
-	if e != nil || !pf.Ready || pf.Executable != workerExe || pf.WorkingDir != workerDir || !reflect.DeepEqual(pf.Args, []string{entry, "-t", "2", "-e"}) {
+	if e != nil || !pf.Ready || pf.Executable != workerExe || pf.WorkingDir != workerDir || !reflect.DeepEqual(pf.Args, []string{entry, "-t", "DailyRoutineTask", "-e", "-h"}) {
 		t.Fatalf("worker preflight %+v err=%v", pf, e)
 	}
 	foundEntry := false
@@ -200,5 +201,18 @@ func TestPythonEntryChecksWithExternalInterpreter(t *testing.T) {
 	pf, e = svc.PreflightHelper(h.ID, "march7th_daily", nil)
 	if e != nil || !pf.Ready || pf.Executable != exe || !reflect.DeepEqual(pf.Args, []string{entry}) {
 		t.Fatal(fmt.Sprintf("%+v", pf), e)
+	}
+}
+
+func TestChainPreservesLifecycleSensitiveWorkerTimeout(t *testing.T) {
+	spec := runner.Spec{Timeout: 6 * time.Hour, PreserveTimeoutInChain: true}
+	applyChainExecutionPolicy("chain", store.Task{Params: "{}"}, &spec)
+	if spec.Timeout != 6*time.Hour {
+		t.Fatalf("lifecycle worker timeout was removed: %s", spec.Timeout)
+	}
+	ordinary := runner.Spec{Timeout: time.Hour}
+	applyChainExecutionPolicy("chain", store.Task{Params: "{}"}, &ordinary)
+	if ordinary.Timeout != 0 {
+		t.Fatalf("ordinary chain timeout should remain soft by default: %s", ordinary.Timeout)
 	}
 }
