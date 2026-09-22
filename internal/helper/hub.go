@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -108,6 +109,16 @@ func (h *Hub) Reload() error {
 			b, err := os.ReadFile(path)
 			if err != nil {
 				return err
+			}
+			// ok-nte is lifecycle-sensitive and built in. Portable upgrades
+			// preserve Config/, so a stale Config/helpers/ok-nte.json from an
+			// older package must not silently restore the obsolete launcher
+			// contract over the embedded definition.
+			var meta struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(bytes.TrimPrefix(b, []byte{239, 187, 191}), &meta) == nil && meta.ID == "ok-nte" {
+				continue
 			}
 			d, err := Parse(b)
 			if err != nil {
