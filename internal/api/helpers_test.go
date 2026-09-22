@@ -57,7 +57,7 @@ func TestHelpersAPIPersistenceAuthAndPreflight(t *testing.T) {
 	w := call("POST", "/api/helpers/one/preflight", `{"type":"task","params":{"task_index":2}}`, "test-token")
 	var pf task.Preflight
 	json.Unmarshal(w.Body.Bytes(), &pf)
-	if w.Code != http.StatusOK || !pf.Ready || pf.Executable != exe || strings.Join(pf.Args, " ") != "-t DailyRoutineTask -e -h" {
+	if w.Code != http.StatusOK || !pf.Ready || pf.Executable != exe || strings.Join(pf.Args, " ") != "-t 2 -e --headless" {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if w := call("GET", "/api/helper-definitions", "", "test-token"); w.Code != 200 || !strings.Contains(w.Body.String(), "ok-nte") {
