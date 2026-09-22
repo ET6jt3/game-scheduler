@@ -20,7 +20,7 @@ func TestNTEArguments(t *testing.T) {
 		p    string
 		want []string
 		bad  bool
-	}{{`{}`, []string{"-t", "DailyRoutineTask", "-e", "-h"}, false}, {`{"task_index":2}`, []string{"-t", "DailyRoutineTask", "-e", "-h"}, false}} {
+	}{{`{}`, []string{"-t", "2", "-e", "--headless"}, false}, {`{"task_index":2}`, []string{"-t", "2", "-e", "--headless"}, false}} {
 		var p map[string]any
 		_ = json.Unmarshal([]byte(tc.p), &p)
 		got, e := d.Arguments("task", p)
