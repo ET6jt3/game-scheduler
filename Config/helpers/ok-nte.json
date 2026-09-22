@@ -19,7 +19,7 @@
   "task_types": {
     "task": {
       "fields": {},
-      "args": ["-t", "DailyRoutineTask", "-e", "-h"]
+      "args": ["-t", "2", "-e", "--headless"]
     },
     "raw": {"raw_args": true}
   },
