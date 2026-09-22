@@ -23,12 +23,12 @@ type Spec struct {
 	RequireCompleteTree    bool          // Windows chains reject launcher-only exits with live descendants
 	PreserveTimeoutInChain bool          // lifecycle-sensitive workers keep their timeout inside daily chains
 	Path                   string        // absolute or PATH-resolvable executable
-	Args                []string      // command-line arguments
-	Dir                 string        // working directory (optional)
-	Env                 []string      // extra environment, appended to os.Environ()
-	Timeout             time.Duration // 0 means no timeout
-	CompletionMarker    string        // optional stdout marker proving managed work completed
-	CompletionGrace     time.Duration // grace period for the launcher to exit after the marker
+	Args                   []string      // command-line arguments
+	Dir                    string        // working directory (optional)
+	Env                    []string      // extra environment, appended to os.Environ()
+	Timeout                time.Duration // 0 means no timeout
+	CompletionMarker       string        // optional stdout marker proving managed work completed
+	CompletionGrace        time.Duration // grace period for the launcher to exit after the marker
 }
 
 // CommandLine renders the spec for logging/storage. It is informational only
