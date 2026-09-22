@@ -20,8 +20,9 @@ import (
 
 // Spec fully describes how to launch one external tool invocation.
 type Spec struct {
-	RequireCompleteTree bool          // Windows chains reject launcher-only exits with live descendants
-	Path                string        // absolute or PATH-resolvable executable
+	RequireCompleteTree    bool          // Windows chains reject launcher-only exits with live descendants
+	PreserveTimeoutInChain bool          // lifecycle-sensitive workers keep their timeout inside daily chains
+	Path                   string        // absolute or PATH-resolvable executable
 	Args                []string      // command-line arguments
 	Dir                 string        // working directory (optional)
 	Env                 []string      // extra environment, appended to os.Environ()
