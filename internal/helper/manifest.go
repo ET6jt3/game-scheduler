@@ -48,10 +48,12 @@ type Definition struct {
 	} `json:"completion,omitempty"`
 }
 type WorkerLaunch struct {
-	Executable string   `json:"executable,omitempty"`
-	WorkingDir string   `json:"working_dir,omitempty"`
-	Entry      string   `json:"entry,omitempty"`
-	TaskTypes  []string `json:"task_types,omitempty"`
+	Executable             string   `json:"executable,omitempty"`
+	WorkingDir             string   `json:"working_dir,omitempty"`
+	Entry                  string   `json:"entry,omitempty"`
+	TaskTypes              []string `json:"task_types,omitempty"`
+	DefaultTimeoutSec      int      `json:"default_timeout_sec,omitempty"`
+	PreserveTimeoutInChain bool     `json:"preserve_timeout_in_chain,omitempty"`
 }
 
 type Field struct {
@@ -119,6 +121,9 @@ func (d *Definition) validate() error {
 	if w.Executable != "" || w.WorkingDir != "" || w.Entry != "" || len(w.TaskTypes) > 0 {
 		if !validWorkerRelativePath(w.Executable) || !validWorkerRelativePath(w.WorkingDir) || !validWorkerRelativePath(w.Entry) || len(w.TaskTypes) == 0 {
 			return fmt.Errorf("launch.worker requires relative executable, working_dir, entry and task_types")
+		}
+		if w.DefaultTimeoutSec < 0 {
+			return fmt.Errorf("launch.worker default_timeout_sec must be >= 0")
 		}
 		seen := map[string]bool{}
 		for _, kind := range w.TaskTypes {
@@ -409,12 +414,24 @@ func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, erro
 		workerDir := workerJoin(root, d.Launch.Worker.WorkingDir)
 		workerExe := workerJoin(root, d.Launch.Worker.Executable)
 		entry := workerJoin(workerDir, d.Launch.Worker.Entry)
-		return runner.Spec{
-			Path:    workerExe,
-			Args:    append([]string{entry}, args...),
-			Dir:     workerDir,
-			Timeout: cmdutil.Timeout(t),
-		}, nil
+		timeout := cmdutil.Timeout(t)
+		if timeout <= 0 && d.Launch.Worker.DefaultTimeoutSec > 0 {
+			timeout = time.Duration(d.Launch.Worker.DefaultTimeoutSec) * time.Second
+		}
+		spec := runner.Spec{
+			Path:                   workerExe,
+			Args:                   append([]string{entry}, args...),
+			Dir:                    workerDir,
+			Timeout:                timeout,
+			PreserveTimeoutInChain: d.Launch.Worker.PreserveTimeoutInChain,
+		}
+		if d.Completion.Marker != "" {
+			spec.CompletionMarker = d.Completion.Marker
+			if d.Completion.GraceSec > 0 {
+				spec.CompletionGrace = time.Duration(d.Completion.GraceSec) * time.Second
+			}
+		}
+		return spec, nil
 	}
 	spec := cmdutil.BaseSpec(g, t, p, args)
 	if d.Completion.Marker != "" {
