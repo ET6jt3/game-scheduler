@@ -811,7 +811,7 @@ func applyChainExecutionPolicy(trigger string, t store.Task, spec *runner.Spec) 
 		return
 	}
 	params, _ := t.ParamsMap()
-	if !cmdutil.Bool(params, "chain_hard_timeout", false) {
+	if !spec.PreserveTimeoutInChain && !cmdutil.Bool(params, "chain_hard_timeout", false) {
 		spec.Timeout = 0
 	}
 }
