@@ -54,9 +54,15 @@ func TestNTEWorkerCommand(t *testing.T) {
 	workerDir := filepath.Join(root, "data", "apps", "ok-nte", "working")
 	workerExe := filepath.Join(root, "data", "apps", "ok-nte", "python", "python.exe")
 	entry := filepath.Join(workerDir, "main.py")
-	wantArgs := []string{entry, "-t", "2", "-e", "--headless"}
-	if spec.Path != workerExe || spec.Dir != workerDir || !reflect.DeepEqual(spec.Args, wantArgs) || spec.Timeout.Seconds() != 37 || !spec.PreserveTimeoutInChain || spec.CompletionMarker != "" {
+	if spec.Path != workerExe || spec.Dir != workerDir || len(spec.Args) != 2 || spec.Args[0] != "-c" || spec.Args[1] != okNTEHeadlessBootstrap || spec.Timeout.Seconds() != 37 || !spec.PreserveTimeoutInChain || spec.CompletionMarker != "" {
 		t.Fatalf("worker spec=%+v", spec)
+	}
+	if !reflect.DeepEqual(spec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1"}) {
+		t.Fatalf("worker env=%v", spec.Env)
+	}
+	entryPath, ok := d.WorkerEntryPath(g, task, spec)
+	if !ok || entryPath != entry {
+		t.Fatalf("worker entry=%q ok=%v", entryPath, ok)
 	}
 	defaultSpec, e := d.BuildCommand(g, store.Task{Type: "task", Params: `{}`})
 	if e != nil || defaultSpec.Timeout != 6*time.Hour {
