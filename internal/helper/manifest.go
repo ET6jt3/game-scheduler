@@ -51,6 +51,7 @@ type WorkerLaunch struct {
 	Executable             string   `json:"executable,omitempty"`
 	WorkingDir             string   `json:"working_dir,omitempty"`
 	Entry                  string   `json:"entry,omitempty"`
+	Bootstrap              string   `json:"bootstrap,omitempty"`
 	TaskTypes              []string `json:"task_types,omitempty"`
 	DefaultTimeoutSec      int      `json:"default_timeout_sec,omitempty"`
 	PreserveTimeoutInChain bool     `json:"preserve_timeout_in_chain,omitempty"`
@@ -124,6 +125,9 @@ func (d *Definition) validate() error {
 		}
 		if w.DefaultTimeoutSec < 0 {
 			return fmt.Errorf("launch.worker default_timeout_sec must be >= 0")
+		}
+		if w.Bootstrap != "" && (d.ID != "ok-nte" || w.Bootstrap != "runtime-services") {
+			return fmt.Errorf("launch.worker bootstrap is reserved for built-in ok-nte runtime-services")
 		}
 		seen := map[string]bool{}
 		for _, kind := range w.TaskTypes {
@@ -394,10 +398,12 @@ func workerJoin(root, rel string) string {
 // a manifest-declared worker instead of the visible/updater launcher.
 func (d *Definition) WorkerEntryPath(g store.Game, t store.Task, spec runner.Spec) (string, bool) {
 	p, e := t.ParamsMap()
-	if e != nil || !d.workerEnabled(g, t, p) || len(spec.Args) == 0 {
+	if e != nil || !d.workerEnabled(g, t, p) {
 		return "", false
 	}
-	return spec.Args[0], true
+	root := filepath.Dir(g.ToolPath)
+	workerDir := workerJoin(root, d.Launch.Worker.WorkingDir)
+	return workerJoin(workerDir, d.Launch.Worker.Entry), true
 }
 
 func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, error) {
@@ -424,6 +430,10 @@ func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, erro
 			Dir:                    workerDir,
 			Timeout:                timeout,
 			PreserveTimeoutInChain: d.Launch.Worker.PreserveTimeoutInChain,
+		}
+		if d.Launch.Worker.Bootstrap == "runtime-services" {
+			spec.Args = []string{"-c", okNTEHeadlessBootstrap}
+			spec.Env = append(spec.Env, "PYTHONIOENCODING=utf-8", "PYTHONUTF8=1")
 		}
 		if d.Completion.Marker != "" {
 			spec.CompletionMarker = d.Completion.Marker
