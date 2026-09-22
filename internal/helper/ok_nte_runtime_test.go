@@ -11,6 +11,7 @@ func TestOKNTEHeadlessBootstrapLifecycle(t *testing.T) {
 		"task = instance.get_onetime_task(2)",
 		"communicate.start_success.emit()",
 		"_ = my_app.openvino_model_async",
+		"GS_OK_NTE_RUNTIME_READY=1",
 		"instance.run_onetime_task(task, exit_after=True)",
 		"GS_OK_NTE_STATUS=",
 		"if failed or pending:",
