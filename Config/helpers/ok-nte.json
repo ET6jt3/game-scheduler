@@ -23,9 +23,5 @@
     },
     "raw": {"raw_args": true}
   },
-  "requirements": {"foreground": true},
-  "completion": {
-    "marker": "Successfully Executed Task, Exiting Game and App!",
-    "grace_sec": 20
-  }
+  "requirements": {"foreground": true}
 }
