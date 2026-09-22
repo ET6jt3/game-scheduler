@@ -54,7 +54,7 @@ func TestNTEWorkerCommand(t *testing.T) {
 	workerDir := filepath.Join(root, "data", "apps", "ok-nte", "working")
 	workerExe := filepath.Join(root, "data", "apps", "ok-nte", "python", "python.exe")
 	entry := filepath.Join(workerDir, "main.py")
-	wantArgs := []string{entry, "-t", "DailyRoutineTask", "-e", "-h"}
+	wantArgs := []string{entry, "-t", "2", "-e", "--headless"}
 	if spec.Path != workerExe || spec.Dir != workerDir || !reflect.DeepEqual(spec.Args, wantArgs) || spec.Timeout.Seconds() != 37 || !spec.PreserveTimeoutInChain || spec.CompletionMarker != "" {
 		t.Fatalf("worker spec=%+v", spec)
 	}
