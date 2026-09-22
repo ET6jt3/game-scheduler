@@ -11,19 +11,21 @@
       "executable": "data/apps/ok-nte/python/python.exe",
       "working_dir": "data/apps/ok-nte/working",
       "entry": "main.py",
-      "task_types": ["task"]
+      "task_types": ["task"],
+      "default_timeout_sec": 21600,
+      "preserve_timeout_in_chain": true
     }
   },
   "task_types": {
     "task": {
-      "fields": {"task_index": {"type": "integer", "required": true, "min": 1}, "exit": {"type": "boolean", "default": true}},
-      "args": ["-t", "{{task_index}}", {"if": "exit", "value": "-e"}]
+      "fields": {},
+      "args": ["-t", "DailyRoutineTask", "-e", "-h"]
     },
     "raw": {"raw_args": true}
   },
   "requirements": {"foreground": true},
   "completion": {
-    "marker": "FINISHED [ok-nte]: Process COMPLETED.",
-    "grace_sec": 5
+    "marker": "Successfully Executed Task, Exiting Game and App!",
+    "grace_sec": 20
   }
 }
