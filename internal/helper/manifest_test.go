@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiabee/game-scheduler/internal/store"
 )
@@ -19,7 +20,7 @@ func TestNTEArguments(t *testing.T) {
 		p    string
 		want []string
 		bad  bool
-	}{{`{"task_index":2}`, []string{"-t", "2", "-e"}, false}, {`{"task_index":3,"exit":false}`, []string{"-t", "3"}, false}, {`{"task_index":0}`, nil, true}, {`{"task_index":1.2}`, nil, true}, {`{"task_index":"2"}`, nil, true}, {`{}`, nil, true}, {`{"task_index":2,"exit":"true"}`, nil, true}} {
+	}{{`{}`, []string{"-t", "DailyRoutineTask", "-e", "-h"}, false}, {`{"task_index":2}`, []string{"-t", "DailyRoutineTask", "-e", "-h"}, false}} {
 		var p map[string]any
 		_ = json.Unmarshal([]byte(tc.p), &p)
 		got, e := d.Arguments("task", p)
@@ -53,9 +54,13 @@ func TestNTEWorkerCommand(t *testing.T) {
 	workerDir := filepath.Join(root, "data", "apps", "ok-nte", "working")
 	workerExe := filepath.Join(root, "data", "apps", "ok-nte", "python", "python.exe")
 	entry := filepath.Join(workerDir, "main.py")
-	wantArgs := []string{entry, "-t", "2", "-e"}
-	if spec.Path != workerExe || spec.Dir != workerDir || !reflect.DeepEqual(spec.Args, wantArgs) || spec.Timeout.Seconds() != 37 || spec.CompletionMarker != "" {
+	wantArgs := []string{entry, "-t", "DailyRoutineTask", "-e", "-h"}
+	if spec.Path != workerExe || spec.Dir != workerDir || !reflect.DeepEqual(spec.Args, wantArgs) || spec.Timeout.Seconds() != 37 || !spec.PreserveTimeoutInChain || spec.CompletionMarker != "Successfully Executed Task, Exiting Game and App!" || spec.CompletionGrace.Seconds() != 20 {
 		t.Fatalf("worker spec=%+v", spec)
+	}
+	defaultSpec, e := d.BuildCommand(g, store.Task{Type: "task", Params: `{}`})
+	if e != nil || defaultSpec.Timeout != 6*time.Hour {
+		t.Fatalf("default worker timeout=%s err=%v", defaultSpec.Timeout, e)
 	}
 
 	raw := store.Task{Type: "raw", Params: `{"raw_args":["--diagnose"]}`}
