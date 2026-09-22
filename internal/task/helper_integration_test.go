@@ -132,7 +132,7 @@ func TestNTEPackagedWorkerPreflight(t *testing.T) {
 		t.Fatal(e)
 	}
 	pf, e := svc.PreflightHelper(h.ID, "task", map[string]any{"task_index": float64(2)})
-	if e != nil || !pf.Ready || pf.Executable != workerExe || pf.WorkingDir != workerDir || !reflect.DeepEqual(pf.Args, []string{entry, "-t", "DailyRoutineTask", "-e", "-h"}) {
+	if e != nil || !pf.Ready || pf.Executable != workerExe || pf.WorkingDir != workerDir || !reflect.DeepEqual(pf.Args, []string{entry, "-t", "2", "-e", "--headless"}) {
 		t.Fatalf("worker preflight %+v err=%v", pf, e)
 	}
 	foundEntry := false
