@@ -35,6 +35,7 @@ my_app = getattr(ok.og, "my_app", None)
 if my_app is None:
     raise RuntimeError("ok-nte Globals service is unavailable")
 _ = my_app.openvino_model_async
+print("GS_OK_NTE_RUNTIME_READY=1", flush=True)
 
 # Keep ok-nte's own exit-after cleanup (including closing the game), then map
 # DailyRoutineTask's internal per-item status to the process exit code.
