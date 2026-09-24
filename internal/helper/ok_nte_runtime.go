@@ -63,7 +63,6 @@ func buildNTEBootstrap() string {
 		"')), '<gs-nte-core>', 'exec'),globals())\n"
 }
 
-
 func buildNTENativeBootstrap() string {
 	source := compressNTETransport(okNTENativeLifecycleSource)
 	exe, err := os.Executable()
