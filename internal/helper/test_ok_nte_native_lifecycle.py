@@ -156,6 +156,7 @@ class Tests(unittest.TestCase):
         instance = FakeInstance()
         capture = FakeCapture()
         instance.task_executor.current_task = instance.launcher
+        instance.launcher.frame = capture.frame
         instance.task_executor.device_manager = types.SimpleNamespace(
             capture_method=capture,
             hwnd_window=FakeHwndWindow(),
@@ -166,7 +167,7 @@ class Tests(unittest.TestCase):
         try:
             native.emit = lambda event, **data: events.append((event, data))
             observer._sample()
-            self.assertEqual(capture.calls, 1)
+            self.assertEqual(capture.calls, 0)
             self.assertTrue(any(event == "LAUNCHER_CAPTURE_TARGET" for event, _ in events))
             self.assertIsNotNone(observer.last_hash)
 
