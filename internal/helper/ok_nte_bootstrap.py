@@ -44,6 +44,18 @@ def emit(event, **data):
         print(line, flush=True)
 
 
+def is_elevated():
+    if os.name != "nt":
+        return False
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        shell32.IsUserAnAdmin.argtypes = []
+        shell32.IsUserAnAdmin.restype = W.BOOL
+        return bool(shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def deadline_option(name, default, low, high):
     try:
         value = float(os.environ.get(name, default))
@@ -429,6 +441,13 @@ def execute(desktop_factory=Desktop, runtime_loader=load_runtime):
             if os.environ.get("GS_OK_NTE_DOCTOR") == "1":
                 outcome.update(reason="DESKTOP_CHECK_ONLY", desktop_ready=True)
                 return 28, outcome  # Diagnostic is never daily-task success.
+            if runtime_loader is load_runtime and not is_elevated():
+                raise Failure(
+                    "ADMIN_REQUIRED",
+                    "ok-nte PC LauncherTask requires administrator rights. "
+                    "For a manual trial, restart Game Scheduler elevated; "
+                    "for unattended logon, use Setup-Startup.cmd.",
+                    30)
             guard.start()
             try:
                 instance, task, events, restore = runtime_loader(guard)
