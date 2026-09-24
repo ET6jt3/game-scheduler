@@ -133,7 +133,11 @@ func TestNTEPackagedWorkerPreflight(t *testing.T) {
 		t.Fatal(e)
 	}
 	pf, e := svc.PreflightHelper(h.ID, "task", map[string]any{"task_index": float64(2)})
-	if e != nil || !pf.Ready || pf.Executable != workerExe || pf.WorkingDir != workerDir || len(pf.Args) != 2 || pf.Args[0] != "-c" || !strings.Contains(pf.Args[1], "communicate.start_success.emit()") || !strings.Contains(pf.Args[1], "GS_OK_NTE_STATUS=") {
+	if e != nil || !pf.Ready || pf.Executable != workerExe || pf.WorkingDir != workerDir || len(pf.Args) != 2 || pf.Args[0] != "-c" ||
+		!strings.Contains(pf.Args[1], "zlib.decompress") ||
+		!strings.Contains(pf.Args[1], "<gs-nte-launcher>") ||
+		!strings.Contains(pf.Args[1], "<gs-nte-core>") ||
+		!strings.Contains(pf.Args[1], "GS_OK_NTE_EVENT_DIR") {
 		t.Fatalf("worker preflight %+v err=%v", pf, e)
 	}
 	foundEntry := false
