@@ -139,7 +139,7 @@ class Tests(unittest.TestCase):
         command = subprocess.list2cmdline(["C:/" + "long-path/" * 50 + "python.exe", "-c", code])
         self.assertLess(len(command.encode("utf-16-le")) // 2, 30000)
     def test_cursor_outside_screen_is_positioned_without_human(self):
-        cls, base = inputs(); d = FakeDesktop(); restore = b.patch_input(cls, base, b.Guard(d))
+        cls, base = inputs(); d = FakeDesktop(); restore = b.patch_input(cls, base, b.Guard(d), b.Failure)
         try:
             obj = cls(); obj.click(400, 300, move_back=True)
             self.assertEqual(d.cursor, (500, 400))
@@ -148,7 +148,7 @@ class Tests(unittest.TestCase):
         finally: restore()
     def test_strict_click_uses_virtual_hover_without_global_cursor(self):
         cls, base = inputs(); d = FakeDesktop(); guard = b.Guard(d, mode="strict-no-mouse")
-        restore = b.patch_input(cls, base, guard)
+        restore = b.patch_input(cls, base, guard, b.Failure)
         try:
             obj = cls(); obj.click(400, 300, move_back=True)
             self.assertEqual(d.cursor, (-400, -400))
@@ -161,27 +161,27 @@ class Tests(unittest.TestCase):
         finally: restore()
 
     def test_positional_click_arguments_normalized(self):
-        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()))
+        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()), b.Failure)
         try:
             obj = cls(); obj.click(4, 5, True, None, 0.01, True, "right")
             self.assertIn(("click", 4, 5, False, False, "right"), obj.calls)
         finally: restore()
     def test_operate_preserves_result_but_not_global_block_or_restore(self):
-        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()))
+        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()), b.Failure)
         try:
             obj = cls(); self.assertEqual(obj.operate(lambda: 17, True, True), 17)
             obj.block_input(); obj.unblock_input(); obj._restore_cursor()
             self.assertEqual(obj.calls, ["sync_stop", ("operate", False, False)])
         finally: restore()
     def test_sendinput_zero_is_error(self):
-        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()))
+        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()), b.Failure)
         try:
             obj = cls(); self.assertEqual(obj.move_mouse_relative(5, 1), 1); obj.send_result = 0
             with self.assertRaisesRegex(b.Failure, "SendInput"): obj.move_mouse_relative(5, 1)
         finally: restore()
     def test_strict_relative_mouse_fails_closed_before_sendinput(self):
         cls, base = inputs(); guard = b.Guard(FakeDesktop(), mode="strict-no-mouse")
-        restore = b.patch_input(cls, base, guard)
+        restore = b.patch_input(cls, base, guard, b.Failure)
         try:
             obj = cls()
             with self.assertRaises(b.Failure) as caught:
@@ -191,7 +191,7 @@ class Tests(unittest.TestCase):
         finally: restore()
 
     def test_lock_mid_run_blocks_next_input(self):
-        cls, base = inputs(); d = FakeDesktop(); restore = b.patch_input(cls, base, b.Guard(d))
+        cls, base = inputs(); d = FakeDesktop(); restore = b.patch_input(cls, base, b.Guard(d), b.Failure)
         try:
             obj = cls(); obj.send_key("f1"); self.assertEqual(len(d.messages), 2)
             d.problem = b.Failure("DESKTOP_UNAVAILABLE", "locked")
@@ -201,7 +201,7 @@ class Tests(unittest.TestCase):
     def test_foreground_denial_blocks_click(self):
         cls, base = inputs(); d = FakeDesktop()
         def deny(hwnd): raise b.Failure("FOREGROUND_DENIED", "denied")
-        d.foreground = deny; restore = b.patch_input(cls, base, b.Guard(d))
+        d.foreground = deny; restore = b.patch_input(cls, base, b.Guard(d), b.Failure)
         try:
             obj = cls()
             with self.assertRaises(b.Failure): obj.click(1, 2)
@@ -210,23 +210,23 @@ class Tests(unittest.TestCase):
     def test_postmessage_failure_cannot_be_swallowed(self):
         cls, base = inputs(); d = FakeDesktop()
         def reject(*args): raise b.Failure("POSTMESSAGE_FAILED", "rejected")
-        d.post = reject; guard = b.Guard(d); restore = b.patch_input(cls, base, guard)
+        d.post = reject; guard = b.Guard(d); restore = b.patch_input(cls, base, guard, b.Failure)
         try:
             with self.assertRaisesRegex(b.Failure, "rejected"): cls().send_key("f1")
             self.assertEqual(guard.failure.reason, "POSTMESSAGE_FAILED")
         finally: restore()
     def test_activation_is_not_progress(self):
-        cls, base = inputs(); guard = b.Guard(FakeDesktop()); restore = b.patch_input(cls, base, guard)
+        cls, base = inputs(); guard = b.Guard(FakeDesktop()); restore = b.patch_input(cls, base, guard, b.Failure)
         try:
             obj = cls(); guard.last_input = 0; obj.post(6, 1, 0)
             self.assertEqual(guard.last_input, 0)
             obj.post(0x100, 70, 0); self.assertGreater(guard.last_input, 0)
         finally: restore()
     def test_unsupported_input_interface_fails(self):
-        with self.assertRaises(b.Failure): b.patch_input(type("Bad", (), {}), object, b.Guard(FakeDesktop()))
+        with self.assertRaises(b.Failure): b.patch_input(type("Bad", (), {}), object, b.Guard(FakeDesktop()), b.Failure)
     def test_signature_drift_fails(self):
         cls, base = inputs(); cls.click = lambda self, anything: None
-        with self.assertRaises(b.Failure): b.patch_input(cls, base, b.Guard(FakeDesktop()))
+        with self.assertRaises(b.Failure): b.patch_input(cls, base, b.Guard(FakeDesktop()), b.Failure)
     def test_future_ready(self):
         f = Future(); value = object(); f.set_result(value)
         self.assertIs(b.wait_detector(types.SimpleNamespace(_started=True, _openvino_model_future=f), b.Guard(FakeDesktop())), value)
