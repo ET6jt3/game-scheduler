@@ -97,6 +97,8 @@ class LauncherCaptureObserver:
         self.same_hash_since = None
         self.last_snapshot = 0.0
         self.snapshot_index = 0
+        self.max_snapshots = 48
+        self.last_stale_emit = 0.0
         self.directory = None
         base = os.environ.get("GS_OK_NTE_EVENT_DIR")
         if base:
@@ -154,7 +156,7 @@ class LauncherCaptureObserver:
         return data
 
     def _write_snapshot(self, frame, metadata, reason):
-        if self.directory is None:
+        if self.directory is None or self.snapshot_index >= self.max_snapshots:
             return None
         self.snapshot_index += 1
         stamp = "%d-%03d" % (time.time_ns(), self.snapshot_index)
@@ -255,14 +257,16 @@ class LauncherCaptureObserver:
             stale_seconds = now - self.same_hash_since
             metadata["stale_seconds"] = round(stale_seconds, 3)
             if stale_seconds >= 15:
-                emit(
-                    "LAUNCHER_CAPTURE_STALE",
-                    stale_seconds=round(stale_seconds, 3),
-                    frame_hash=digest,
-                    hwnd=metadata["hwnd"],
-                    window_rect=metadata.get("window_rect"),
-                    pos_valid=metadata["pos_valid"],
-                )
+                if now - self.last_stale_emit >= 10:
+                    emit(
+                        "LAUNCHER_CAPTURE_STALE",
+                        stale_seconds=round(stale_seconds, 3),
+                        frame_hash=digest,
+                        hwnd=metadata["hwnd"],
+                        window_rect=metadata.get("window_rect"),
+                        pos_valid=metadata["pos_valid"],
+                    )
+                    self.last_stale_emit = now
                 if now - self.last_snapshot >= 30:
                     reason = reason or "stale-frame"
         else:
@@ -273,7 +277,6 @@ class LauncherCaptureObserver:
                     frame_hash=digest,
                     hwnd=metadata["hwnd"],
                 )
-                reason = reason or "frame-changed"
             self.last_hash = digest
             self.same_hash_since = now
 
