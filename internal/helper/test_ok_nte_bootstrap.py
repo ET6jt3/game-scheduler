@@ -296,6 +296,15 @@ class Tests(unittest.TestCase):
     def test_bad_deadline_policy(self):
         for value in ("nan", "-1", "0", "inf", "bad"):
             with patch.dict(os.environ, {"GS_OK_NTE_INIT_TIMEOUT": value}), self.assertRaises(b.Failure): b.Guard(FakeDesktop())
+    def test_real_runtime_requires_admin_before_import(self):
+        d = FakeDesktop()
+        with patch.object(b, "is_elevated", return_value=False),              patch.object(b.Guard, "start", lambda g: self.fail("watchdog should not start")):
+            code, out = b.execute(lambda: d, b.load_runtime)
+        self.assertEqual(code, 30)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["reason"], "ADMIN_REQUIRED")
+        self.assertTrue(d.closed)
+
     def test_doctor_does_not_import_runtime_or_count_as_task_success(self):
         d = FakeDesktop()
         with patch.dict(os.environ, {"GS_OK_NTE_DOCTOR": "1"}):
