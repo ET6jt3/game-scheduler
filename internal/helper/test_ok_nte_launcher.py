@@ -201,6 +201,61 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.guard.mode,'cursor-compatible')
         self.assertEqual(self.desktop.clicks,[(11,(950,670))])
 
+    def test_strict_refuses_cursor_based_screensaver_dismissal(self):
+        self.restore(); self.restore=lambda:None
+        launcher_task_module=types.ModuleType('fixture_launcher_task')
+        screensaver_module=types.ModuleType('fixture_screensaver')
+        screensaver_module.is_screensaver_running=lambda:True
+        def dismiss(): raise AssertionError('upstream cursor dismissal must not run')
+        dismiss.__module__='fixture_screensaver'
+        launcher_task_module.dismiss_screensaver=dismiss
+        old_module=NativeLauncher.__module__
+        try:
+            NativeLauncher.__module__='fixture_launcher_task'
+            with patch.dict(sys.modules, {
+                'fixture_launcher_task':launcher_task_module,
+                'fixture_screensaver':screensaver_module}):
+                self.guard=b.Guard(self.desktop,mode='strict-no-mouse'); self.guard.init_deadline=None
+                self.restore=b.patch_launcher(
+                    self.task,self.guard,b.Failure,b.emit,
+                    compat_driver=lambda d,h,p,f:d.click(h,p),
+                    uia_driver=lambda h,p,f:False,
+                    post_driver=lambda d,h,p,f:d.click(h,p))
+                with self.assertRaises(b.Failure) as caught:
+                    launcher_task_module.dismiss_screensaver()
+                self.assertEqual(caught.exception.reason,'SCREENSAVER_ACTIVE')
+        finally:
+            NativeLauncher.__module__=old_module
+
+    def test_compatibility_keeps_upstream_screensaver_dismissal(self):
+        self.restore(); self.restore=lambda:None
+        calls=[]
+        launcher_task_module=types.ModuleType('fixture_launcher_task_compat')
+        screensaver_module=types.ModuleType('fixture_screensaver_compat')
+        screensaver_module.is_screensaver_running=lambda:True
+        def dismiss(): calls.append('dismissed'); return True
+        dismiss.__module__='fixture_screensaver_compat'
+        launcher_task_module.dismiss_screensaver=dismiss
+        old_module=NativeLauncher.__module__
+        try:
+            NativeLauncher.__module__='fixture_launcher_task_compat'
+            with patch.dict(sys.modules, {
+                'fixture_launcher_task_compat':launcher_task_module,
+                'fixture_screensaver_compat':screensaver_module}):
+                self.guard=b.Guard(self.desktop,mode='cursor-compatible'); self.guard.init_deadline=None
+                self.restore=b.patch_launcher(
+                    self.task,self.guard,b.Failure,b.emit,
+                    compat_driver=lambda d,h,p,f:d.click(h,p),
+                    uia_driver=lambda h,p,f:False,
+                    post_driver=lambda d,h,p,f:d.click(h,p))
+                self.assertTrue(launcher_task_module.dismiss_screensaver())
+                self.assertEqual(calls,['dismissed'])
+                self.restore()
+                self.restore=lambda:None
+                self.assertIs(launcher_task_module.dismiss_screensaver,dismiss)
+        finally:
+            NativeLauncher.__module__=old_module
+
 
 class InputAPITests(unittest.TestCase):
     def setUp(self):
