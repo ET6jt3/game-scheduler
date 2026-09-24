@@ -21,7 +21,11 @@ var okNTECoreSource string
 //go:embed _gs_nte_launcher.py
 var okNTELauncherSource string
 
+//go:embed ok_nte_native_lifecycle.py
+var okNTENativeLifecycleSource string
+
 var okNTEHeadlessBootstrap = buildNTEBootstrap()
+var okNTENativeLifecycleBootstrap = buildNTENativeBootstrap()
 
 func compressNTETransport(source string) string {
 	var data bytes.Buffer
@@ -57,4 +61,22 @@ func buildNTEBootstrap() string {
 		"os.environ.setdefault('GS_OK_NTE_EVENT_DIR', " + string(logDir) + ")\n" +
 		"exec(compile(zlib.decompress(base64.b64decode('" + core +
 		"')), '<gs-nte-core>', 'exec'),globals())\n"
+}
+
+
+func buildNTENativeBootstrap() string {
+	source := compressNTETransport(okNTENativeLifecycleSource)
+	exe, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	root := filepath.Dir(exe)
+	if strings.EqualFold(filepath.Base(root), "App") {
+		root = filepath.Dir(root)
+	}
+	logDir, _ := json.Marshal(filepath.Join(root, "Logs", "ok-nte"))
+	return "import zlib,base64,os\n" +
+		"os.environ.setdefault('GS_OK_NTE_EVENT_DIR', " + string(logDir) + ")\n" +
+		"exec(compile(zlib.decompress(base64.b64decode('" + source +
+		"')), '<gs-nte-native>', 'exec'),globals())\n"
 }
