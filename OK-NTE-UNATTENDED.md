@@ -165,3 +165,48 @@ schema and must not be used by scheduled production chains.
 
 Existing saved tasks that contain historical `input_mode` values continue to
 resolve to the native lifecycle so users do not have to recreate their chains.
+
+
+## Native launcher capture diagnostics
+
+The native production lifecycle includes a **read-only launcher observer**. It
+does not call `capture.get_frame()`, does not replace `LauncherTask`, does not
+click, resize, recenter or rebind capture, and does not consume a second WGC or
+BitBlt stream. It only inspects the `LauncherTask.frame` that OK-NTE already
+acquired for its own recognition.
+
+While the upstream `LauncherTask` is the current task, diagnostics are written
+under:
+
+`Logs/ok-nte/launcher-capture/`
+
+Each saved pair contains:
+
+- `launcher-<timestamp>.png` — the exact task frame OK-NTE was analyzing;
+- matching `.json` metadata with HWND, PID, class/title (when available),
+  window rect, OK-Script position/size/crop values, capture backend,
+  `capture_target_signature`, frame SHA-256, frame min/max/mean, and the exact
+  launcher-ready probe rectangle;
+- `launcher_button_ready_percentage` calculated from the same BGR range
+  (215–225 on each channel) used by upstream `LauncherTask`.
+
+Relevant JSONL events:
+
+- `LAUNCHER_CAPTURE_DIAGNOSTICS_READY`
+- `LAUNCHER_CAPTURE_OBSERVER_ACTIVE`
+- `LAUNCHER_CAPTURE_TARGET` — HWND/geometry/capture signature changed;
+- `LAUNCHER_CAPTURE_POSITION_INVALID`
+- `LAUNCHER_CAPTURE_STALE` — the same task-frame SHA-256 persisted for at
+  least 15 seconds;
+- `LAUNCHER_CAPTURE_RECOVERED` — a previously stale task frame changed;
+- `LAUNCHER_CAPTURE_SNAPSHOT` — records the PNG and metadata paths.
+
+Snapshots are bounded to 48 files per run. Normal animation frames are not
+continuously dumped. The observer saves the first launcher frame, target/signature
+changes, invalid-position evidence, periodic stale-frame evidence, and the first
+frame after a stale period recovers.
+
+For the remote-connection symptom, leave OK-NTE stalled for at least 20–30
+seconds before connecting remotely. After it begins working, preserve the
+newest stale-before and `stale-frame-recovered` PNG/JSON pairs together with
+the run's `nte-native-*.jsonl`.
