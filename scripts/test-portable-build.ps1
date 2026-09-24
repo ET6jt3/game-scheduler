@@ -50,8 +50,11 @@ try{
  # a user-added helper definition that must migrate.
  $oldHelperDir=Join-Path $first 'Config\helpers'
  [void][IO.Directory]::CreateDirectory($oldHelperDir)
- Set-Content -LiteralPath (Join-Path $oldHelperDir 'ok-nte.json') -Value '{"schema_version":1,"stale":true}' -Encoding UTF8
- Set-Content -LiteralPath (Join-Path $oldHelperDir 'user-custom.json') -Value '{"custom":true}' -Encoding UTF8
+ $oldNtePath=Join-Path $oldHelperDir 'ok-nte.json'
+ $oldNteOriginal=Get-Content -LiteralPath $oldNtePath -Raw
+ Set-Content -LiteralPath $oldNtePath -Value '{"schema_version":1,"stale":true}' -Encoding UTF8
+ $oldCustomPath=Join-Path $oldHelperDir 'user-custom.json'
+ Set-Content -LiteralPath $oldCustomPath -Value '{"custom":true}' -Encoding UTF8
  & (Join-Path $second 'App\Migrate-From-Previous.ps1') -PreviousRoot $first
  if(!(Test-Path (Join-Path $second 'Data\preserve.txt'))){throw 'Migration did not copy Data'}
  if((Get-Content (Join-Path $second 'Config\config.json') -Raw) -notmatch '18080'){throw 'Migration did not copy config.json'}
@@ -63,6 +66,10 @@ try{
  if(!$migrationBackup){throw 'Migration did not create safety backup'}
  if(!(Test-Path -LiteralPath (Join-Path $migrationBackup.FullName 'previous-Config__helpers\ok-nte.json'))){throw 'Migration did not back up skipped previous ok-nte definition'}
  Write-Host 'PASS: previous portable state migrates; current built-in definitions win; user helper definitions are preserved'
+ # Restore the first build after the migration fixture. The next workflow step
+ # deliberately smokes dist\GameScheduler-Portable, which is this first build.
+ Set-Content -LiteralPath $oldNtePath -Value $oldNteOriginal -Encoding UTF8
+ Remove-Item -LiteralPath $oldCustomPath -Force -ErrorAction SilentlyContinue
  $goEnv=(& $bootstrap -GoArgs @('env','-json','GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOENV','GOTOOLCHAIN','GOTELEMETRY','GOTELEMETRYDIR')) -join "`n" | ConvertFrom-Json
  foreach($key in @('GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOTELEMETRYDIR')){
   if(!$goEnv.$key.StartsWith((Join-Path $repoRoot 'Toolchain'),[StringComparison]::OrdinalIgnoreCase)){throw "$key escaped repository: $($goEnv.$key)"}
