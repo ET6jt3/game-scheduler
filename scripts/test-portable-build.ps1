@@ -46,12 +46,23 @@ try{
  Set-Content -LiteralPath (Join-Path $first 'Config\config.json') -Value '{"addr":"127.0.0.1:18080","data_dir":"${ROOT}/../Data","db_path":"${DATA}/scheduler.db"}' -Encoding UTF8
  Set-Content -LiteralPath (Join-Path $first 'Helpers\managed-marker.txt') -Value 'managed helper state'
  Set-Content -LiteralPath (Join-Path $first 'Runtime\runtime-marker.txt') -Value 'runtime state'
+ # Simulate a stale package-owned helper definition from an older release and
+ # a user-added helper definition that must migrate.
+ $oldHelperDir=Join-Path $first 'Config\helpers'
+ [void][IO.Directory]::CreateDirectory($oldHelperDir)
+ Set-Content -LiteralPath (Join-Path $oldHelperDir 'ok-nte.json') -Value '{"schema_version":1,"stale":true}' -Encoding UTF8
+ Set-Content -LiteralPath (Join-Path $oldHelperDir 'user-custom.json') -Value '{"custom":true}' -Encoding UTF8
  & (Join-Path $second 'App\Migrate-From-Previous.ps1') -PreviousRoot $first
  if(!(Test-Path (Join-Path $second 'Data\preserve.txt'))){throw 'Migration did not copy Data'}
  if((Get-Content (Join-Path $second 'Config\config.json') -Raw) -notmatch '18080'){throw 'Migration did not copy config.json'}
  if(!(Test-Path (Join-Path $second 'Helpers\managed-marker.txt')) -or !(Test-Path (Join-Path $second 'Runtime\runtime-marker.txt'))){throw 'Migration did not copy managed helper/runtime state'}
- if(!(Get-ChildItem (Join-Path $second 'Backups') -Directory | Where-Object Name -like 'pre-migration-*')){throw 'Migration did not create safety backup'}
- Write-Host 'PASS: previous portable state migrates into a newly extracted package'
+ $newNte=Get-Content -LiteralPath (Join-Path $second 'Config\helpers\ok-nte.json') -Raw
+ if($newNte -notmatch '"lifecycle_mode"' -or $newNte -notmatch '"native"'){throw 'Migration overwrote current ok-nte lifecycle definition'}
+ if(!(Test-Path -LiteralPath (Join-Path $second 'Config\helpers\user-custom.json'))){throw 'Migration did not copy user-added helper definition'}
+ $migrationBackup=Get-ChildItem (Join-Path $second 'Backups') -Directory | Where-Object Name -like 'pre-migration-*' | Select-Object -First 1
+ if(!$migrationBackup){throw 'Migration did not create safety backup'}
+ if(!(Test-Path -LiteralPath (Join-Path $migrationBackup.FullName 'previous-Config__helpers\ok-nte.json'))){throw 'Migration did not back up skipped previous ok-nte definition'}
+ Write-Host 'PASS: previous portable state migrates; current built-in definitions win; user helper definitions are preserved'
  $goEnv=(& $bootstrap -GoArgs @('env','-json','GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOENV','GOTOOLCHAIN','GOTELEMETRY','GOTELEMETRYDIR')) -join "`n" | ConvertFrom-Json
  foreach($key in @('GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOTELEMETRYDIR')){
   if(!$goEnv.$key.StartsWith((Join-Path $repoRoot 'Toolchain'),[StringComparison]::OrdinalIgnoreCase)){throw "$key escaped repository: $($goEnv.$key)"}
