@@ -27,6 +27,12 @@ try{
  if($LASTEXITCODE -ne 0){throw 'First build failed'}
  $first=(Get-Content dist\last-build.txt -Raw).Trim()
  if(!(Test-Path (Join-Path $first 'App\server.exe'))){throw 'First build missing server'}
+ $elevatedLauncher=Join-Path $first 'Run-Elevated.cmd'
+ if(!(Test-Path -LiteralPath $elevatedLauncher)){throw 'First build missing Run-Elevated.cmd'}
+ $elevatedText=Get-Content -LiteralPath $elevatedLauncher -Raw
+ if($elevatedText -notmatch 'Portable\.ps1.*-Action Stop' -or $elevatedText -notmatch '-Verb RunAs'){
+  throw 'Run-Elevated.cmd does not stop safely then request elevation'
+ }
  $before=(Get-FileHash (Join-Path $first 'App\server.exe')).Hash
  Set-Content -LiteralPath (Join-Path $first 'Data\preserve.txt') -Value 'keep existing user data'
  & .\Build.cmd
