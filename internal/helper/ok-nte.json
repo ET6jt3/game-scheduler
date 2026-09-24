@@ -28,15 +28,7 @@
   },
   "task_types": {
     "task": {
-      "fields": {
-        "lifecycle_mode": {
-          "type": "enum",
-          "default": "native",
-          "enum": [
-            "native"
-          ]
-        }
-      },
+      "fields": {},
       "args": [
         "-t",
         "2",
