@@ -138,3 +138,30 @@ native lifecycle instead of silently retaining the unstable adapter.
 Hosted CI can validate command routing, lifecycle observation, packaging and
 process supervision, but only the user's Windows machine can qualify the actual
 installed NTE launcher/game state.
+
+
+## Production autonomous launcher entry
+
+The normal `task` type is now native-only.
+
+Game Scheduler selects the installed `DailyRoutineTask`, verifies that exactly
+one upstream `LauncherTask` exists with `enable_after_start=True`, initializes
+the normal headless OK-Script runtime services, and calls the upstream
+`run_onetime_task(..., exit_after=True)` entry. From that point forward OK-NTE
+owns the full lifecycle:
+
+1. native LauncherTask checks/starts the official NTE launcher;
+2. native launcher capture detects popup/update/start state;
+3. native OK-NTE waits for updates without scheduler click injection;
+4. native OK-NTE launches HTGame.exe;
+5. native OK-NTE switches capture from launcher to game and verifies readiness;
+6. native DailyRoutineTask runs its configured daily subtasks;
+7. Game Scheduler only observes task completion, supervises timeout/cancellation,
+   and records the final result.
+
+The older adapted launcher/input implementation remains embedded only as
+diagnostic/recovery code. It is no longer selectable from the ordinary task
+schema and must not be used by scheduled production chains.
+
+Existing saved tasks that contain historical `input_mode` values continue to
+resolve to the native lifecycle so users do not have to recreate their chains.
