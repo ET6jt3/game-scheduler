@@ -432,8 +432,7 @@ func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, erro
 			PreserveTimeoutInChain: d.Launch.Worker.PreserveTimeoutInChain,
 		}
 		if d.Launch.Worker.Bootstrap == "runtime-services" {
-			spec.Args = []string{"-c", okNTEHeadlessBootstrap}
-			mode := "cursor-compatible"
+			mode := "native"
 			if raw, ok := p["input_mode"].(string); ok && strings.TrimSpace(raw) != "" {
 				mode = raw
 			} else if field, ok := d.TaskTypesMap[t.Type].Fields["input_mode"]; ok {
@@ -443,8 +442,14 @@ func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, erro
 			}
 			spec.Env = append(spec.Env,
 				"PYTHONIOENCODING=utf-8",
-				"PYTHONUTF8=1",
-				"GS_OK_NTE_INPUT_MODE="+mode)
+				"PYTHONUTF8=1")
+			if mode == "native" {
+				spec.Args = []string{"-c", okNTENativeLifecycleBootstrap}
+				spec.Env = append(spec.Env, "GS_OK_NTE_LIFECYCLE=native")
+			} else {
+				spec.Args = []string{"-c", okNTEHeadlessBootstrap}
+				spec.Env = append(spec.Env, "GS_OK_NTE_INPUT_MODE="+mode)
+			}
 		}
 		if d.Completion.Marker != "" {
 			spec.CompletionMarker = d.Completion.Marker
