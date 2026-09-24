@@ -63,6 +63,7 @@ func TestOKNTENativeLifecycleSource(t *testing.T) {
 		"LauncherCaptureObserver",
 		"LAUNCHER_CAPTURE_SNAPSHOT",
 		"LAUNCHER_CAPTURE_STALE",
+		"LAUNCHER_CAPTURE_RECOVERED",
 		"capture_target_signature",
 		"launcher_button_ready_percentage",
 	} {
