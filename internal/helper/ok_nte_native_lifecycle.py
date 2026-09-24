@@ -109,6 +109,11 @@ class LauncherCaptureObserver:
                 self.directory = None
 
     def start(self):
+        emit(
+            "LAUNCHER_CAPTURE_DIAGNOSTICS_READY",
+            directory=self.directory,
+            max_snapshots=self.max_snapshots,
+        )
         self.thread = threading.Thread(
             target=self._run,
             name="GS-NTE-LauncherCaptureObserver",
@@ -224,6 +229,30 @@ class LauncherCaptureObserver:
 
         metadata["frame_shape"] = list(getattr(frame, "shape", ()))
         try:
+            shape = metadata["frame_shape"]
+            if len(shape) >= 2:
+                height, width = int(shape[0]), int(shape[1])
+                x1 = max(0, min(width, round(width * 0.8137)))
+                y1 = max(0, min(height, round(height * 0.8678)))
+                x2 = max(x1, min(width, round(width * 0.8387)))
+                y2 = max(y1, min(height, round(height * 0.9022)))
+                metadata["launcher_button_probe_box"] = [x1, y1, x2, y2]
+                pixels = frame[:, :, :3]
+                metadata["frame_mean"] = round(float(pixels.mean()), 4)
+                metadata["frame_min"] = int(pixels.min())
+                metadata["frame_max"] = int(pixels.max())
+                if x2 > x1 and y2 > y1:
+                    import cv2
+                    region = frame[y1:y2, x1:x2, :3]
+                    mask = cv2.inRange(region, (215, 215, 215), (225, 225, 225))
+                    total = float(region.size) / 3.0
+                    metadata["launcher_button_ready_percentage"] = (
+                        float(cv2.countNonZero(mask)) / total if total else 0.0
+                    )
+        except Exception as error:
+            metadata["frame_metric_error"] = type(error).__name__ + ": " + str(error)
+
+        try:
             raw = memoryview(frame).cast("B")
             digest = hashlib.sha256(raw).hexdigest()
         except Exception:
@@ -265,6 +294,9 @@ class LauncherCaptureObserver:
                         hwnd=metadata["hwnd"],
                         window_rect=metadata.get("window_rect"),
                         pos_valid=metadata["pos_valid"],
+                        launcher_button_ready_percentage=metadata.get(
+                            "launcher_button_ready_percentage"
+                        ),
                     )
                     self.last_stale_emit = now
                 if now - self.last_snapshot >= 30:
