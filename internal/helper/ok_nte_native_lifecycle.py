@@ -214,18 +214,18 @@ class LauncherCaptureObserver:
         metadata["capture_target_signature"] = repr(
             getattr(hwnd_window, "capture_target_signature", None)
         )
-        try:
-            frame = capture.get_frame()
-        except Exception as error:
-            emit(
-                "LAUNCHER_CAPTURE_ERROR",
-                error=type(error).__name__ + ": " + str(error),
-                **metadata,
-            )
-            return
+
+        # Observe the exact frame already acquired by OK-NTE's LauncherTask.
+        # Do not call capture.get_frame() from this diagnostic thread: a second
+        # capture consumer could itself perturb WGC/BitBlt timing.
+        frame = getattr(self.launcher, "frame", None)
         if frame is None:
             emit("LAUNCHER_CAPTURE_EMPTY", **metadata)
             return
+        try:
+            frame = frame.copy()
+        except Exception:
+            pass
 
         metadata["frame_shape"] = list(getattr(frame, "shape", ()))
         try:
