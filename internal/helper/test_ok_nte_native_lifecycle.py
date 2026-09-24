@@ -1,5 +1,6 @@
 import importlib.util
 import pathlib
+import time
 import types
 import unittest
 
@@ -52,13 +53,53 @@ class LauncherTask:
 LauncherTask.__module__ = "src.tasks.LauncherTask"
 
 
+class FakeFrame(bytearray):
+    shape = (1, 1, 3)
+
+
+class FakeCapture:
+    def __init__(self, payload=b"abc"):
+        self.frame = FakeFrame(payload)
+        self.calls = 0
+
+    def connected(self):
+        return True
+
+    def get_frame(self):
+        self.calls += 1
+        return self.frame
+
+
+class FakeHwndWindow:
+    hwnd = 123
+    top_hwnd = 123
+    exists = True
+    visible = True
+    pos_valid = True
+    x = 10
+    y = 20
+    width = 1920
+    height = 1080
+    window_width = 1920
+    window_height = 1080
+    client_width = 1920
+    client_height = 1080
+    real_x_offset = 0
+    real_y_offset = 0
+    real_width = 1920
+    real_height = 1080
+    capture_target_signature = (123, 123, 1920, 1080)
+
+
 class FakeInstance:
     def __init__(self, daily=None, launcher=None, signal=None):
         self.daily = daily or DailyRoutineTask()
         self.launcher = launcher or LauncherTask()
         self.signal = signal or Signal()
         self.task_executor = types.SimpleNamespace(
-            onetime_tasks=[self.launcher, self.daily]
+            onetime_tasks=[self.launcher, self.daily],
+            current_task=None,
+            device_manager=None,
         )
         self.quit_called = False
         self.run_called = False
@@ -110,6 +151,32 @@ class Tests(unittest.TestCase):
             proof.verify()
         self.assertEqual(caught.exception.reason, "TASK_ITEMS_FAILED")
         proof.restore()
+
+    def test_launcher_capture_observer_reports_target_and_stale_frame(self):
+        instance = FakeInstance()
+        capture = FakeCapture()
+        instance.task_executor.current_task = instance.launcher
+        instance.task_executor.device_manager = types.SimpleNamespace(
+            capture_method=capture,
+            hwnd_window=FakeHwndWindow(),
+        )
+        observer = native.LauncherCaptureObserver(instance, instance.launcher)
+        events = []
+        original_emit = native.emit
+        try:
+            native.emit = lambda event, **data: events.append((event, data))
+            observer._sample()
+            self.assertEqual(capture.calls, 1)
+            self.assertTrue(any(event == "LAUNCHER_CAPTURE_TARGET" for event, _ in events))
+            self.assertIsNotNone(observer.last_hash)
+
+            observer._sample()
+            observer.same_hash_since = time.monotonic() - 20
+            observer.last_stale_emit = 0
+            observer._sample()
+            self.assertTrue(any(event == "LAUNCHER_CAPTURE_STALE" for event, _ in events))
+        finally:
+            native.emit = original_emit
 
     def test_execute_uses_native_instance_without_patching_launcher(self):
         signal = Signal()
