@@ -22,7 +22,7 @@ try{
   Write-Host "Building $cmd with repository-local Go ..."
   & (Join-Path $PSScriptRoot 'portable-go.ps1') -GoArgs @('build','-trimpath','-ldflags',"-s -w -X github.com/xiabee/game-scheduler/internal/version.Version=portable-$revision",'-o',(Join-Path $stage "App\$cmd.exe"),"./cmd/$cmd")
  }
- foreach($cmd in @('Start.cmd','Stop.cmd','Setup-Startup.cmd','Remove-Startup.cmd','Migrate-From-Previous.cmd')){Copy-Item (Join-Path $repoRoot "packaging\$cmd") $stage}
+ foreach($cmd in @('Start.cmd','Run-Elevated.cmd','Stop.cmd','Setup-Startup.cmd','Remove-Startup.cmd','Migrate-From-Previous.cmd')){Copy-Item (Join-Path $repoRoot "packaging\$cmd") $stage}
  foreach($script in @('Portable.ps1','Startup.ps1','Migrate-From-Previous.ps1')){Copy-Item (Join-Path $repoRoot ('packaging\'+$script)) (Join-Path $stage 'App')}
  Copy-Item (Join-Path $repoRoot 'packaging\config.example.json') (Join-Path $stage 'Config')
  Copy-Item (Join-Path $repoRoot 'Config\helpers\ok-nte.json') (Join-Path $stage 'Config\helpers')
