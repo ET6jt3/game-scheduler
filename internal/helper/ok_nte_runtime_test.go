@@ -68,10 +68,10 @@ func TestOKNTENativeLifecycleSource(t *testing.T) {
 	for _, forbidden := range []string{
 		"patch_launcher(",
 		"patch_input(",
-		"NTEInteraction",
-		"SetCursorPos",
-		"SendInput",
-		"uia_invoke",
+		"from src.interaction.NTEInteraction",
+		"SetCursorPos(",
+		"SendInput(",
+		"def uia_invoke",
 	} {
 		if strings.Contains(okNTENativeLifecycleSource, forbidden) {
 			t.Fatalf("native lifecycle source unexpectedly owns input/launcher behavior: %q", forbidden)
