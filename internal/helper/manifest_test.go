@@ -66,17 +66,11 @@ func TestNTEWorkerCommand(t *testing.T) {
 		!reflect.DeepEqual(legacySpec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_LIFECYCLE=native"}) {
 		t.Fatalf("legacy stored input_mode did not migrate to native lifecycle: %+v err=%v", legacySpec, e)
 	}
-	adaptedTask := store.Task{Type: "task", Params: `{"lifecycle_mode":"adapted","input_mode":"strict-no-mouse"}`}
-	adaptedSpec, e := d.BuildCommand(g, adaptedTask)
-	if e != nil || adaptedSpec.Args[1] != okNTEHeadlessBootstrap ||
-		!reflect.DeepEqual(adaptedSpec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_LIFECYCLE=adapted", "GS_OK_NTE_INPUT_MODE=strict-no-mouse"}) {
-		t.Fatalf("explicit adapted fallback worker=%+v err=%v", adaptedSpec, e)
+	if _, e := d.BuildCommand(g, store.Task{Type: "task", Params: `{"lifecycle_mode":"adapted"}`}); e == nil {
+		t.Fatal("adapted lifecycle must not be selectable from production task schema")
 	}
 	if _, e := d.BuildCommand(g, store.Task{Type: "task", Params: `{"lifecycle_mode":"invalid"}`}); e == nil {
 		t.Fatal("invalid ok-nte lifecycle mode accepted")
-	}
-	if _, e := d.BuildCommand(g, store.Task{Type: "task", Params: `{"input_mode":"invalid"}`}); e == nil {
-		t.Fatal("invalid ok-nte input mode accepted")
 	}
 	entryPath, ok := d.WorkerEntryPath(g, task, spec)
 	if !ok || entryPath != entry {
