@@ -11,8 +11,13 @@ import (
 
 func TestOKNTEHeadlessBootstrapLifecycle(t *testing.T) {
 	for _, needle := range []string{"--headless", "communicate.start_success.emit()", "GS_OK_NTE_RUNTIME_READY=1", "GS_OK_NTE_STATUS=", "class Proof", "FOREGROUND_DENIED", "strict-no-mouse", "cursor-compatible", "INPUT_AUDIT"} {
+		if !strings.Contains(okNTECoreSource, needle) && !strings.Contains(okNTELauncherSource, needle) {
+			t.Fatalf("readable embedded sources missing %q", needle)
+		}
+	}
+	for _, needle := range []string{"zlib.decompress", "<gs-nte-launcher>", "<gs-nte-core>", "GS_OK_NTE_EVENT_DIR"} {
 		if !strings.Contains(okNTEHeadlessBootstrap, needle) {
-			t.Fatalf("embedded bootstrap missing %q", needle)
+			t.Fatalf("assembled compressed transport missing %q", needle)
 		}
 	}
 }
