@@ -26,7 +26,7 @@ try{
  foreach($script in @('Portable.ps1','Startup.ps1','Migrate-From-Previous.ps1')){Copy-Item (Join-Path $repoRoot ('packaging\'+$script)) (Join-Path $stage 'App')}
  Copy-Item (Join-Path $repoRoot 'packaging\config.example.json') (Join-Path $stage 'Config')
  Copy-Item (Join-Path $repoRoot 'Config\helpers\ok-nte.json') (Join-Path $stage 'Config\helpers')
- foreach($file in @('LICENSE','PORTABLE-LAYOUT.md','MIGRATION-NOTES.md','IMPLEMENTATION-REPORT.md','TEST-REPORT.md','AUTOMATION.md')){if(Test-Path $file){Copy-Item $file $stage}}
+ foreach($file in @('LICENSE','PORTABLE-LAYOUT.md','MIGRATION-NOTES.md','IMPLEMENTATION-REPORT.md','TEST-REPORT.md','AUTOMATION.md','OK-NTE-UNATTENDED.md')){if(Test-Path $file){Copy-Item $file $stage}}
  Copy-Item (Join-Path $repoRoot 'packaging\README.md') (Join-Path $stage 'README.md')
  Copy-Item (Join-Path $repoRoot 'examples\helper-instances.json') (Join-Path $stage 'Config\helper-instances.example.json')
  Set-Content -LiteralPath (Join-Path $stage 'Helpers\README.txt') -Value 'Optional managed helpers. Install only by explicit choice; external helpers may live anywhere.' -Encoding UTF8
