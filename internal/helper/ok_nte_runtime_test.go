@@ -10,7 +10,7 @@ import (
 )
 
 func TestOKNTEHeadlessBootstrapLifecycle(t *testing.T) {
-	for _, needle := range []string{"--headless", "communicate.start_success.emit()", "GS_OK_NTE_RUNTIME_READY=1", "GS_OK_NTE_STATUS=", "class Proof", "FOREGROUND_DENIED"} {
+	for _, needle := range []string{"--headless", "communicate.start_success.emit()", "GS_OK_NTE_RUNTIME_READY=1", "GS_OK_NTE_STATUS=", "class Proof", "FOREGROUND_DENIED", "strict-no-mouse", "cursor-compatible", "INPUT_AUDIT"} {
 		if !strings.Contains(okNTEHeadlessBootstrap, needle) {
 			t.Fatalf("embedded bootstrap missing %q", needle)
 		}
