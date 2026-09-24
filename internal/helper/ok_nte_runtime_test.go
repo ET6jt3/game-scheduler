@@ -60,6 +60,11 @@ func TestOKNTENativeLifecycleSource(t *testing.T) {
 		"communicate.start_success.emit()",
 		"launcher_owned_by",
 		"TASK_ITEMS_FAILED",
+		"LauncherCaptureObserver",
+		"LAUNCHER_CAPTURE_SNAPSHOT",
+		"LAUNCHER_CAPTURE_STALE",
+		"capture_target_signature",
+		"launcher_button_ready_percentage",
 	} {
 		if !strings.Contains(okNTENativeLifecycleSource, needle) {
 			t.Fatalf("native lifecycle source missing %q", needle)
@@ -72,6 +77,10 @@ func TestOKNTENativeLifecycleSource(t *testing.T) {
 		"SetCursorPos(",
 		"SendInput(",
 		"def uia_invoke",
+		"capture.get_frame(",
+		"ensure_capture(",
+		"bring_to_front(",
+		"resize_window(",
 	} {
 		if strings.Contains(okNTENativeLifecycleSource, forbidden) {
 			t.Fatalf("native lifecycle source unexpectedly owns input/launcher behavior: %q", forbidden)
