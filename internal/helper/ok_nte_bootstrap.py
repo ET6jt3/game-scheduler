@@ -16,7 +16,10 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from ctypes import wintypes as W
 from dataclasses import dataclass
 
-VERSION = "unattended-desktop-v1"
+VERSION = "unattended-desktop-v2-launcher"
+_EVENT_FILE = None
+_EVENT_LOCK = threading.Lock()
+_EVENT_BYTES = 0
 
 
 class Failure(RuntimeError):
@@ -26,8 +29,18 @@ class Failure(RuntimeError):
 
 
 def emit(event, **data):
-    print("GS_OK_NTE_EVENT=" + json.dumps(dict(event=event, adapter=VERSION, **data),
-          ensure_ascii=True), flush=True)
+    global _EVENT_BYTES
+    line = "GS_OK_NTE_EVENT=" + json.dumps(dict(event=event, adapter=VERSION,
+            time=time.time(), **data), ensure_ascii=True)
+    with _EVENT_LOCK:
+        if _EVENT_FILE is not None and _EVENT_BYTES < 8 * 1024 * 1024:
+            try:
+                _EVENT_FILE.write(line + "\n")
+                _EVENT_FILE.flush()
+                _EVENT_BYTES += len(line) + 1
+            except OSError:
+                pass  # stdout remains authoritative if the diagnostic disk fails
+        print(line, flush=True)
 
 
 def deadline_option(name, default, low, high):
@@ -232,6 +245,11 @@ class Guard:
         self.stop, self.lock = threading.Event(), threading.Lock()
         self.last_input, self.running, self.completion_deadline = time.monotonic(), False, None
         self.init_deadline = time.monotonic() + deadline_option("GS_OK_NTE_INIT_TIMEOUT", 180, 5, 1800)
+        self.launch_deadline = None
+        self.update_extension = False
+        self.launch_budget = deadline_option("GS_OK_NTE_LAUNCH_TIMEOUT", 300, 30, 1800)
+        self.update_budget = deadline_option("GS_OK_NTE_UPDATE_TIMEOUT", 1800, 30, 21600)
+        self.next_heartbeat = time.monotonic()
         self.idle = deadline_option("GS_OK_NTE_NO_INPUT_TIMEOUT", 600, 30, 21600)
 
     def fail(self, error):
@@ -253,6 +271,12 @@ class Guard:
     def poll(self, now=None):
         self.check()
         now = time.monotonic() if now is None else now
+        if now >= self.next_heartbeat:
+            phase = "initializing" if self.init_deadline else "launcher" if self.launch_deadline else "daily" if self.running else "dispatch-or-cleanup"
+            emit("HEARTBEAT", phase=phase, launcher_seconds_left=(round(max(0, self.launch_deadline-now)) if self.launch_deadline else None))
+            self.next_heartbeat = now + 5
+        if self.launch_deadline and now >= self.launch_deadline:
+            raise self.fail(Failure("LAUNCHER_TIMEOUT", "Native launcher did not establish game/capture readiness within its fixed budget", 29))
         if self.init_deadline and now >= self.init_deadline:
             raise self.fail(Failure("RUNTIME_INIT_TIMEOUT", "Initialization deadline exceeded", 23))
         if self.completion_deadline and now >= self.completion_deadline:
@@ -347,6 +371,9 @@ def patch_input(cls, base, guard):
         for name, fn in original.items():
             setattr(cls, name, fn)
     return restore
+
+
+from _gs_nte_launcher import patch_launcher
 
 
 class Proof:
@@ -448,9 +475,21 @@ def execute(desktop_factory=Desktop, runtime_loader=load_runtime):
             guard.start()
             try:
                 instance, task, events, restore = runtime_loader(guard)
+                if runtime_loader is load_runtime:
+                    launchers = [t for t in instance.task_executor.onetime_tasks
+                                 if type(t).__name__ == "LauncherTask" and type(t).__module__ == "src.tasks.LauncherTask"]
+                    if len(launchers) != 1:
+                        raise Failure("LAUNCHER_INTERFACE_UNSUPPORTED", "Expected exactly one LauncherTask", 24)
+                    restore_input = restore
+                    restore_launcher = patch_launcher(launchers[0], guard, Failure, emit)
+                    def restore():
+                        restore_launcher()
+                        if restore_input:
+                            restore_input()
                 proof = Proof(task, guard)
                 events.task_done.connect(proof.on_done)
                 emit("TASK_DISPATCH", input_mode=mode, task_class=type(task).__name__)
+                guard.launch_deadline = time.monotonic() + guard.launch_budget
                 instance.run_onetime_task(task, exit_after=True)
                 outcome.update(ok=True, reason="TASK_COMPLETED", status=proof.verify())
                 code = 0
@@ -489,8 +528,22 @@ def main():
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="backslashreplace", line_buffering=True)
+    global _EVENT_FILE
+    directory = os.environ.get("GS_OK_NTE_EVENT_DIR")
+    if directory:
+        try:
+            os.makedirs(directory, exist_ok=True)
+            filename = os.path.join(directory, "nte-%d-%d.jsonl" % (time.time_ns(), os.getpid()))
+            _EVENT_FILE = open(filename, "x", encoding="utf-8", buffering=1)
+            print("GS_OK_NTE_EVENT_LOG=" + filename, flush=True)
+        except OSError as error:
+            print("GS_OK_NTE_EVENT_LOG_ERROR=" + str(error), file=sys.stderr, flush=True)
+    emit("WORKER_STARTED", pid=os.getpid())
     code, outcome = execute()
+    emit("WORKER_RESULT", code=code, outcome=outcome)
     print("GS_OK_NTE_STATUS=" + json.dumps(outcome, ensure_ascii=True, default=str), flush=True)
+    if _EVENT_FILE is not None:
+        _EVENT_FILE.close()
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(code)  # No orphan non-daemon Python thread can hold the chain open.

@@ -1,6 +1,33 @@
-# ok-nte unattended desktop adapter v1
+# ok-nte unattended desktop adapter v2: native launcher
 
 This document supersedes the NTE bootstrap description in AUTOMATION.md.
+
+## Native launcher correction
+
+Execution #102 showed the v1 adapter was being used, with empty dashboard output
+while the run was still active. That snapshot does not contain runtime events
+and cannot identify the precise point at which that attempt stopped. Inspection
+confirmed two gaps: the input wrapper covered NTEInteraction inside the game,
+but LauncherTask uses a different PostMessage backend; and the inactivity timer
+covered daily tasks, not launcher waits.
+
+The v2 adapter wraps the loaded native LauncherTask separately. A recognized
+Start Game, Update, or launcher-popup-close rectangle is clicked with checked
+foreground SendInput. The native launcher HWND, capture HWND, cursor target,
+and window under the pointer are verified. Arbitrary numeric coordinates and
+unknown controls are rejected. Each control has at most three click attempts,
+spaced by at least ten seconds. Sending input does not prove the game started:
+GAME_READY requires the actual game process/window and matching capture.
+
+The existing upstream template recognizer still locates the controls. This patch
+does not guess a location when recognition fails, implement new templates, bypass
+login/UAC, or claim that fixture tests prove a particular launcher skin works.
+
+Native-launcher/controller dispatch has a 300-second default deadline. A detected
+updating state adds 1,800 seconds once, not every frame. This is visual state,
+not verified download-byte progress. Both limits are configurable below. The
+existing whole-task timeout may expire sooner. Launcher timeout/input failure
+returns nonzero, after which the chain follows its existing stop/continue policy.
 
 ## Deployment contract
 
@@ -65,6 +92,23 @@ cause a runner failure after the helper reports completion.
 
 ## Diagnostics
 
+The worker now writes a unique, flushed UTF-8 event file while it runs:
+`Logs/ok-nte/nte-<timestamp>-<pid>.jsonl` inside the scheduler package, not the
+external game directory. GS_OK_NTE_EVENT_DIR can select another directory. Each
+file is bounded to approximately 8 MiB; files are not automatically deleted.
+Full upstream stdout/stderr still appear in the execution record on completion.
+The dashboard does not yet stream those buffers: an empty active-run display is
+not evidence that the worker has produced no logs.
+
+WORKER_STARTED and five-second HEARTBEAT records show the current phase.
+Launcher records include LAUNCHER_BEGIN, LAUNCHER_CONTROL, LAUNCHER_CLICK_ATTEMPT,
+LAUNCHER_CLICK_SENT, LAUNCHER_UPDATE_WAIT, and GAME_READY. LAUNCHER_CLICK_SENT
+explicitly does not claim process startup. BLOCKED records identify rejection,
+missing transitions, or timeout. WORKER_RESULT records the final outcome when
+normal cleanup completes. Diagnostic file failure does not change a task into
+success; stdout and exit status remain authoritative.
+
+
 Output contains GS_OK_NTE_EVENT structured lines, GS_OK_NTE_RUNTIME_READY=1,
 TASK_DISPATCH, and GS_OK_NTE_STATUS with ok/reason/status. BLOCKED includes a
 specific cause, such as FOREGROUND_DENIED, DESKTOP_UNAVAILABLE, INPUT_REJECTED,
@@ -74,7 +118,8 @@ or CLEANUP_TIMEOUT instead of the final status object; its exit remains nonzero.
 Exit codes: 20 task-proof/items failure; 21 desktop/session unavailable; 22 worker
 exception/interruption; 23 initialization failure/timeout; 24 unsupported
 interface/policy; 25 daily input inactivity; 26 window/input failure; 27 exit or
-cleanup timeout; 28 diagnostic-only (never daily-task success).
+cleanup timeout; 28 diagnostic-only (never daily-task success); 29 native-launcher
+control, transition, input, or deadline failure.
 
 Worker environment options, inherited from the scheduler:
 
@@ -83,10 +128,13 @@ Worker environment options, inherited from the scheduler:
 | GS_OK_NTE_INPUT_MODE | unattended-desktop | Only supported mode. Other values fail explicitly. |
 | GS_OK_NTE_INIT_TIMEOUT | 180 seconds | Initialization limit; accepted range 5-1800. |
 | GS_OK_NTE_NO_INPUT_TIMEOUT | 600 seconds | Daily input inactivity limit; range 30-21600. |
+| GS_OK_NTE_LAUNCH_TIMEOUT | 300 seconds | Native launcher and pre-daily dispatch budget; range 30-1800. |
+| GS_OK_NTE_UPDATE_TIMEOUT | 1800 seconds | One-time extra allowance for a visual updating state; range 30-21600. |
+| GS_OK_NTE_EVENT_DIR | package Logs/ok-nte | Per-run live structured diagnostic directory. |
 | GS_OK_NTE_DOCTOR | unset | Set to 1 for desktop/power-lease checks without importing game code or issuing input; exit 28. |
 
-The inactivity timer runs during DailyRoutineTask, NOT during native launcher
-update/download waiting. It detects absence of delivered input, not ineffective
+The daily inactivity timer runs during DailyRoutineTask. The separate launcher
+deadline now covers native launcher/update/download waiting. It detects absence of delivered input, not ineffective
 repeated actions or every possible game-progress failure. The existing whole-task
 timeout (six-hour fallback when unset) still bounds this helper inside chains.
 Completion gets 30 seconds for upstream exit-after behavior; explicit shutdown
@@ -110,6 +158,17 @@ Only then enable unattended production chaining. No real game was exercised by
 the automated fixtures, and no locked-desktop operation is claimed.
 
 ## Tests and research
+
+The added launcher fixture suite covers recognized-control routing, checked
+foreground mouse-down/up, blocked/obstructed input, stale captures, missing game
+transitions, retry limits, one-time update extension, launch deadlines, persistent
+failures even when upstream catches an exception, and live event-file flushing.
+Go tests execute that suite and a diagnostic-only invocation of the actual
+assembled Python command. The command is checked against the Windows limit;
+the small launcher module is compressed for transport, while both source files
+remain readable and embedded in server.exe. No external Python installation or
+source file is required in production.
+
 
 The Go helper test runs Python behavioral fixtures if a Python 3.10+ test
 interpreter exists. Production uses the helper's own packaged Python. Fixtures
