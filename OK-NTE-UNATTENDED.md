@@ -18,9 +18,16 @@ The helper task exposes `input_mode`; no external Python files need to be edited
 ## Deployment contract
 
 All modes still require a dedicated, active, unlocked interactive Windows desktop
-with a usable display surface. This is not Session-0, locked-screen, secure-desktop
-or displayless automation. The adapter does not bypass login, UAC, anti-cheat,
-launcher authentication, or game security.
+with a usable display surface. The installed upstream PC LauncherTask also requires
+an administrator token. A non-elevated manual run now fails immediately with
+`ADMIN_REQUIRED` instead of being misreported as `GAME_NOT_READY`.
+
+For a manual qualification run, start the portable package with
+`Run-Elevated.cmd` (one UAC consent is expected). For unattended production,
+run `Setup-Startup.cmd` once; it registers the scheduler for the signed-in
+interactive user at the highest run level. This is not Session-0, locked-screen,
+secure-desktop or displayless automation. The adapter does not bypass login, UAC,
+anti-cheat, launcher authentication, or game security.
 
 The v2-compatible mode remains the production fallback because some Windows/Qt
 controls may ignore background messages. Strict mode is intentionally fail-closed:
@@ -93,16 +100,18 @@ Helper-reported success is not independent proof that a reward was received.
 
 1. Install a Windows artifact built from the v3 commit.
 2. Stop any independently running ok-nte GUI.
-3. Run ok-nte alone in `cursor-compatible` and verify current v2 behavior.
-4. Run ok-nte alone in `strict-no-mouse`; leave the physical pointer untouched
+3. For a manual trial, launch Game Scheduler with `Run-Elevated.cmd`. Verify
+   the NTE log does not contain `ADMIN_REQUIRED`.
+4. Run ok-nte alone in `cursor-compatible` and verify current v2 behavior.
+5. Run ok-nte alone in `strict-no-mouse`; leave the physical pointer untouched
    and inspect `INPUT_AUDIT`.
-5. Test `auto` and confirm `INPUT_MODE_SELECTED` records the locked choice.
-6. Test the exact enabled DailyRoutineTask items, including any task that uses
+6. Test `auto` and confirm `INPUT_MODE_SELECTED` records the locked choice.
+7. Test the exact enabled DailyRoutineTask items, including any task that uses
    hover-sensitive controls.
-7. Qualify with the physical mouse unplugged.
-8. Confirm locked/disconnected desktop, missing display, model-init failure,
+8. Qualify with the physical mouse unplugged.
+9. Confirm locked/disconnected desktop, missing display, model-init failure,
    launcher failure and task-item failure all return nonzero.
-9. Only after those checks re-enable the full daily chain.
+10. Only after those checks re-enable the full daily chain.
 
 Hosted CI exercises fixtures, command transport and Windows packaging but cannot
 qualify the user's native NTE launcher, installed game, GPU/display session or
@@ -126,3 +135,16 @@ actual rewards.
   NTEInteraction, CursorSync, BaseNTETask and PostMessageInteraction.
 - Microsoft Win32 documentation for PostMessage mouse messages, SendInput,
   SetCursorPos, UI Automation InvokePattern and SetThreadExecutionState.
+
+
+## Administrator requirement
+
+Upstream ok-nte's PC `LauncherTask.run()` calls its administrator check before
+it checks the game process or prepares the launcher. When the process is not
+elevated, upstream emits restart-admin UI signals and returns. Headless scheduler
+execution cannot satisfy a UAC consent prompt after dispatch, so the adapter
+checks elevation before importing/running the real NTE task and returns exit
+code **30 / ADMIN_REQUIRED**.
+
+This is not an input-backend failure. No launcher-control or mouse-adaptation
+test has occurred until this gate passes.
