@@ -205,10 +205,15 @@ def patch_launcher(task, guard, Failure, emit, compat_driver=desktop_click,
         invoked = uia_driver(hwnd, point, Failure)
         if invoked:
             count('uia_invokes')
+            if mode == 'auto':
+                guard.mode = 'strict-no-mouse'
+                emit('INPUT_MODE_SELECTED', requested='auto',
+                     selected='strict-no-mouse', reason='launcher-uia-available')
             return 'uia-invoke', False
         if mode == 'auto':
-            emit('LAUNCHER_BACKEND_FALLBACK', from_backend='uia-invoke',
-                 to_backend='compat-sendinput', reason='uia-unavailable')
+            guard.mode = 'cursor-compatible'
+            emit('INPUT_MODE_SELECTED', requested='auto',
+                 selected='cursor-compatible', reason='launcher-uia-unavailable')
             count('cursor_positions')
             count('send_input', 2)
             count('compat_clicks')
