@@ -303,12 +303,30 @@ class LauncherCaptureObserver:
                     reason = reason or "stale-frame"
         else:
             if self.last_hash is not None:
+                stale_before_change = (
+                    now - self.same_hash_since
+                    if self.same_hash_since is not None
+                    else 0.0
+                )
                 emit(
                     "LAUNCHER_CAPTURE_CHANGED",
                     previous_hash=self.last_hash,
                     frame_hash=digest,
                     hwnd=metadata["hwnd"],
+                    stale_before_change=round(stale_before_change, 3),
                 )
+                if stale_before_change >= 15:
+                    emit(
+                        "LAUNCHER_CAPTURE_RECOVERED",
+                        stale_seconds=round(stale_before_change, 3),
+                        previous_hash=self.last_hash,
+                        frame_hash=digest,
+                        hwnd=metadata["hwnd"],
+                        launcher_button_ready_percentage=metadata.get(
+                            "launcher_button_ready_percentage"
+                        ),
+                    )
+                    reason = reason or "stale-frame-recovered"
             self.last_hash = digest
             self.same_hash_since = now
 
