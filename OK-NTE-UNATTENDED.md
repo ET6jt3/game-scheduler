@@ -7,7 +7,7 @@ OK-NTE's launcher/input implementation.
 
 The `task` helper type defaults to:
 
-`input_mode = native`
+`lifecycle_mode = native`
 
 The scheduler starts OK-NTE's bundled Python runtime from the installed helper,
 loads the installed `src.config`, installs OK-NTE's own startup patches, and
@@ -110,21 +110,23 @@ from the installed OK-NTE implementation.
 
 ## Legacy fallback modes
 
-The older adapter remains available only for explicit troubleshooting:
+The older adapter remains available only for explicit troubleshooting by setting
+`lifecycle_mode = adapted` and then choosing one of:
 
 - `cursor-compatible`
 - `strict-no-mouse`
 - `auto`
 
-Those modes use the v3 scheduler-owned adapter. They are no longer the default
-production path.
+Existing tasks saved by older builds may contain only `input_mode`; because they
+do not contain `lifecycle_mode=adapted`, they now migrate automatically to the
+native lifecycle instead of silently retaining the unstable adapter.
 
 ## Qualification
 
 1. Install the new portable Game Scheduler artifact and migrate persistent state.
 2. Stop any independently running OK-NTE instance.
 3. Start Game Scheduler with `Run-Elevated.cmd`.
-4. Edit the OK-NTE helper task and select `native`.
+4. Edit the OK-NTE helper task and confirm `lifecycle_mode` is `native`.
 5. Run OK-NTE alone.
 6. Confirm the log says `native-lifecycle-v1` and `native_launcher=true`.
 7. Confirm OK-NTE itself launches/updates the native launcher, enters the game,
