@@ -60,17 +60,17 @@ func TestNTEWorkerCommand(t *testing.T) {
 	if !reflect.DeepEqual(spec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_LIFECYCLE=native"}) {
 		t.Fatalf("native worker env=%v", spec.Env)
 	}
-	legacyTask := store.Task{Type: "task", Params: `{"input_mode":"strict-no-mouse"}`}
-	legacySpec, e := d.BuildCommand(g, legacyTask)
-	if e != nil || legacySpec.Args[1] != okNTENativeLifecycleBootstrap ||
-		!reflect.DeepEqual(legacySpec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_LIFECYCLE=native"}) {
-		t.Fatalf("legacy stored input_mode did not migrate to native lifecycle: %+v err=%v", legacySpec, e)
-	}
-	if _, e := d.BuildCommand(g, store.Task{Type: "task", Params: `{"lifecycle_mode":"adapted"}`}); e == nil {
-		t.Fatal("adapted lifecycle must not be selectable from production task schema")
-	}
-	if _, e := d.BuildCommand(g, store.Task{Type: "task", Params: `{"lifecycle_mode":"invalid"}`}); e == nil {
-		t.Fatal("invalid ok-nte lifecycle mode accepted")
+	for _, stale := range []string{
+		`{"input_mode":"strict-no-mouse"}`,
+		`{"lifecycle_mode":"adapted","input_mode":"strict-no-mouse"}`,
+		`{"lifecycle_mode":"invalid","input_mode":"invalid"}`,
+	} {
+		staleTask := store.Task{Type: "task", Params: stale}
+		staleSpec, err := d.BuildCommand(g, staleTask)
+		if err != nil || staleSpec.Args[1] != okNTENativeLifecycleBootstrap ||
+			!reflect.DeepEqual(staleSpec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_LIFECYCLE=native"}) {
+			t.Fatalf("stale stored params did not force native lifecycle: params=%s spec=%+v err=%v", stale, staleSpec, err)
+		}
 	}
 	entryPath, ok := d.WorkerEntryPath(g, task, spec)
 	if !ok || entryPath != entry {
