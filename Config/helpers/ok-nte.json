@@ -29,11 +29,18 @@
   "task_types": {
     "task": {
       "fields": {
-        "input_mode": {
+        "lifecycle_mode": {
           "type": "enum",
           "default": "native",
           "enum": [
             "native",
+            "adapted"
+          ]
+        },
+        "input_mode": {
+          "type": "enum",
+          "default": "cursor-compatible",
+          "enum": [
             "cursor-compatible",
             "strict-no-mouse",
             "auto"
