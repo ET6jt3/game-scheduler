@@ -62,8 +62,11 @@ class Tests(unittest.TestCase):
         self.stack.enter_context(patch.dict(os.environ,{},clear=True))
         self.desktop=Desktop(); self.guard=b.Guard(self.desktop); self.guard.init_deadline=None
         self.task=NativeLauncher()
-        self.restore=b.patch_launcher(self.task,self.guard,b.Failure,b.emit,
-                click_driver=lambda d,h,p,f:d.click(h,p))
+        self.restore=b.patch_launcher(
+            self.task,self.guard,b.Failure,b.emit,
+            compat_driver=lambda d,h,p,f:d.click(h,p),
+            uia_driver=lambda h,p,f:False,
+            post_driver=lambda d,h,p,f:d.click(h,p))
     def tearDown(self): self.restore(); self.stack.close()
     def test_launcher_not_just_game_gets_foreground_click(self):
         self.task.after_click=self.task.enter_game
@@ -143,6 +146,61 @@ class Tests(unittest.TestCase):
         self.assertEqual(ctypes.sizeof(launcher.Input),40 if ctypes.sizeof(ctypes.c_void_p)==8 else 28)
 
 
+    def test_strict_launcher_uses_postmessage_when_uia_unavailable(self):
+        self.restore(); self.restore=lambda:None
+        self.desktop.clicks.clear()
+        self.guard=b.Guard(self.desktop,mode='strict-no-mouse'); self.guard.init_deadline=None
+        self.restore=b.patch_launcher(
+            self.task,self.guard,b.Failure,b.emit,
+            compat_driver=lambda d,h,p,f: (_ for _ in ()).throw(AssertionError('compat used')),
+            uia_driver=lambda h,p,f:False,
+            post_driver=lambda d,h,p,f:d.click(h,p))
+        self.task.after_click=self.task.enter_game
+        self.task.run()
+        self.assertEqual(self.desktop.clicks,[(11,(950,670))])
+        audit=self.guard.verify_input_contract()
+        self.assertEqual(audit['send_input'],0)
+        self.assertEqual(audit['launcher_post_clicks'],1)
+
+    def test_strict_launcher_prefers_uia(self):
+        self.restore(); self.restore=lambda:None
+        calls=[]
+        self.guard=b.Guard(self.desktop,mode='strict-no-mouse'); self.guard.init_deadline=None
+        self.restore=b.patch_launcher(
+            self.task,self.guard,b.Failure,b.emit,
+            compat_driver=lambda d,h,p,f: (_ for _ in ()).throw(AssertionError('compat used')),
+            uia_driver=lambda h,p,f:(calls.append((h,p)) or True),
+            post_driver=lambda d,h,p,f: (_ for _ in ()).throw(AssertionError('post used')))
+        self.task.after_click=self.task.enter_game
+        self.task.run()
+        self.assertEqual(calls,[(11,(950,670))])
+        self.assertEqual(self.guard.audit_snapshot()['uia_invokes'],1)
+
+    def test_auto_locks_strict_after_successful_uia(self):
+        self.restore(); self.restore=lambda:None
+        self.guard=b.Guard(self.desktop,mode='auto'); self.guard.init_deadline=None
+        self.restore=b.patch_launcher(
+            self.task,self.guard,b.Failure,b.emit,
+            compat_driver=lambda d,h,p,f: (_ for _ in ()).throw(AssertionError('compat used')),
+            uia_driver=lambda h,p,f:True,
+            post_driver=lambda d,h,p,f:True)
+        self.task.after_click=self.task.enter_game
+        self.task.run()
+        self.assertEqual(self.guard.mode,'strict-no-mouse')
+
+    def test_auto_locks_compatibility_before_first_input_when_uia_unavailable(self):
+        self.restore(); self.restore=lambda:None
+        self.guard=b.Guard(self.desktop,mode='auto'); self.guard.init_deadline=None
+        self.restore=b.patch_launcher(
+            self.task,self.guard,b.Failure,b.emit,
+            compat_driver=lambda d,h,p,f:d.click(h,p),
+            uia_driver=lambda h,p,f:False,
+            post_driver=lambda d,h,p,f: (_ for _ in ()).throw(AssertionError('post used')))
+        self.task.after_click=self.task.enter_game
+        self.task.run()
+        self.assertEqual(self.guard.mode,'cursor-compatible')
+        self.assertEqual(self.desktop.clicks,[(11,(950,670))])
+
 
 class InputAPITests(unittest.TestCase):
     def setUp(self):
@@ -153,11 +211,14 @@ class InputAPITests(unittest.TestCase):
         def send(count,pointer,size):
             self.flags.append((pointer._obj.data.mi.dwFlags,size))
             return self.accept.pop(0)
+        self.posts=[]
         self.desktop=types.SimpleNamespace(
-            position=lambda h,p:None, check=lambda:None,
+            position=lambda h,p:None, check=lambda:None, target=lambda h:None,
+            post=lambda h,m,w,l:self.posts.append((h,m,w,l)),
             u=types.SimpleNamespace(
                 WindowFromPoint=Function(lambda p:self.hit),
                 IsChild=Function(lambda p,c:False),
+                ScreenToClient=Function(lambda h,p:True),
                 SendInput=Function(send),
                 GetForegroundWindow=Function(lambda:self.foreground),
                 GetAncestor=Function(lambda h,f:h)))
@@ -186,6 +247,11 @@ class InputAPITests(unittest.TestCase):
         with patch('time.sleep',side_effect=RuntimeError('interrupted')), self.assertRaises(RuntimeError):
             launcher.desktop_click(self.desktop,11,(100,100),b.Failure)
         self.assertEqual([f for f,_ in self.flags],[2,4])
+    def test_postmessage_click_uses_virtual_messages_only(self):
+        launcher.postmessage_click(self.desktop,11,(100,100),b.Failure)
+        self.assertEqual([m[1] for m in self.posts],[0x200,0x201,0x202])
+        self.assertEqual(self.flags,[])
+
 
 
 if __name__=='__main__': unittest.main(verbosity=2)
