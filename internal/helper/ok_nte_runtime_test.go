@@ -51,7 +51,6 @@ func TestOKNTEBootstrapBehavior(t *testing.T) {
 	t.Log(string(out))
 }
 
-
 func TestOKNTENativeLifecycleSource(t *testing.T) {
 	for _, needle := range []string{
 		"native-lifecycle-v1",
