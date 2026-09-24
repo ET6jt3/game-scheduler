@@ -216,8 +216,8 @@ class LauncherCaptureObserver:
         )
 
         # Observe the exact frame already acquired by OK-NTE's LauncherTask.
-        # Do not call capture.get_frame() from this diagnostic thread: a second
-        # capture consumer could itself perturb WGC/BitBlt timing.
+        # Do not request a second capture frame from this diagnostic thread:
+        # another capture consumer could itself perturb WGC/BitBlt timing.
         frame = getattr(self.launcher, "frame", None)
         if frame is None:
             emit("LAUNCHER_CAPTURE_EMPTY", **metadata)
