@@ -1,7 +1,8 @@
-"""Unattended *interactive-desktop* adapter. No human mouse activity is needed.
+"""Dual-mode unattended interactive-desktop adapter for ok-nte.
 
 Embedded by Game Scheduler; never installed into the external helper/game.
-Not a cursor-free, locked-desktop, or Session-0 backend. No lock-policy changes.
+Supports a strict no-global-mouse mode and the v2 cursor-compatible mode.
+Neither mode supports a locked desktop, Session 0, or displayless execution.
 """
 from __future__ import annotations
 import ctypes
@@ -16,7 +17,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from ctypes import wintypes as W
 from dataclasses import dataclass
 
-VERSION = "unattended-desktop-v2-launcher"
+VERSION = "unattended-desktop-v3-dual-input"
 _EVENT_FILE = None
 _EVENT_LOCK = threading.Lock()
 _EVENT_BYTES = 0
@@ -74,8 +75,6 @@ def validate(state):
         raise Failure("DESKTOP_UNAVAILABLE", "Input desktop is locked, switched, or unavailable")
     if state.monitors < 1:
         raise Failure("DISPLAY_UNAVAILABLE", "No active display surface is enumerated")
-    if not state.cursor:
-        raise Failure("CURSOR_UNAVAILABLE", "Windows cursor APIs are unavailable")
 
 
 class Desktop:
@@ -240,8 +239,15 @@ class Desktop:
 
 
 class Guard:
-    def __init__(self, desktop):
+    def __init__(self, desktop, mode="cursor-compatible", requested_mode=None):
         self.desktop, self.failure, self.instance = desktop, None, None
+        self.mode = mode
+        self.requested_mode = requested_mode or mode
+        self.audit = {
+            "post_messages": 0, "virtual_moves": 0, "uia_invokes": 0,
+            "launcher_post_clicks": 0, "compat_clicks": 0,
+            "cursor_positions": 0, "send_input": 0, "block_input": 0,
+        }
         self.stop, self.lock = threading.Event(), threading.Lock()
         self.last_input, self.running, self.completion_deadline = time.monotonic(), False, None
         self.init_deadline = time.monotonic() + deadline_option("GS_OK_NTE_INIT_TIMEOUT", 180, 5, 1800)
@@ -251,6 +257,26 @@ class Guard:
         self.update_budget = deadline_option("GS_OK_NTE_UPDATE_TIMEOUT", 1800, 30, 21600)
         self.next_heartbeat = time.monotonic()
         self.idle = deadline_option("GS_OK_NTE_NO_INPUT_TIMEOUT", 600, 30, 21600)
+
+    def count(self, name, amount=1):
+        with self.lock:
+            self.audit[name] = self.audit.get(name, 0) + amount
+
+    def audit_snapshot(self):
+        with self.lock:
+            return dict(self.audit)
+
+    def verify_input_contract(self):
+        if self.mode == "strict-no-mouse":
+            audit = self.audit_snapshot()
+            forbidden = {name: audit.get(name, 0) for name in
+                         ("cursor_positions", "send_input", "block_input")
+                         if audit.get(name, 0)}
+            if forbidden:
+                raise self.fail(Failure(
+                    "STRICT_INPUT_CONTRACT_BREACH",
+                    "Strict mode used global mouse APIs: " + repr(forbidden), 26))
+        return self.audit_snapshot()
 
     def fail(self, error):
         with self.lock:
@@ -304,19 +330,22 @@ def patch_input(cls, base, guard):
     original = {name: getattr(cls, name, None) for name in names}
     if not all(callable(fn) for fn in original.values()) or not callable(getattr(base, "post", None)):
         raise Failure("INPUT_BACKEND_UNSUPPORTED", "Required NTE input interface missing", 24)
-    for name, keys in (("click", ("x", "y", "move", "move_back")), ("operate", ("block", "restore_cursor"))):
+    for name, keys in (("click", ("x", "y", "move", "move_back")),
+                       ("operate", ("block", "restore_cursor"))):
         if not all(key in inspect.signature(original[name]).parameters for key in keys):
             raise Failure("INPUT_BACKEND_UNSUPPORTED", "NTE signature changed: " + name, 24)
     original_post = base.post
+
     def post(obj, message, wParam=0, lParam=0, hwnd=None):
         try:
             guard.check()
             guard.desktop.post(obj.hwnd if hwnd is None else hwnd, message, wParam, lParam)
-            # Count actual input messages, not synthetic activation polling.
             if 0x100 <= message <= 0x109 or 0x200 <= message <= 0x20E:
                 guard.last_input = time.monotonic()
+                guard.count("post_messages")
         except Failure as error:
             raise guard.fail(error)
+
     def init(obj, *args, **kwargs):
         original["__init__"](obj, *args, **kwargs)
         sync = getattr(obj, "_cursor_sync", None)
@@ -328,6 +357,7 @@ def patch_input(cls, base, guard):
             thread.join(1)
             if thread.is_alive():
                 raise guard.fail(Failure("CURSOR_SYNC_STOP_FAILED", "Cursor synchronization did not stop", 26))
+
     def wrap(name):
         function, signature = original[name], inspect.signature(original[name])
         @functools.wraps(function)
@@ -336,21 +366,41 @@ def patch_input(cls, base, guard):
                 try:
                     guard.check()
                     hwnd = obj.hwnd_window.hwnd
-                    guard.desktop.foreground(hwnd)
                     bound = signature.bind(obj, *args, **kwargs)
                     bound.apply_defaults()
-                    if name == "click":
+                    mode = guard.mode
+                    if name == "operate":
+                        bound.arguments.update(block=False, restore_cursor=False)
+                    elif name == "click":
                         x, y = bound.arguments["x"], bound.arguments["y"]
                         if x < 0 or y < 0:
-                            x, y = round(obj.capture.width/2), round(obj.capture.height/2)
-                        guard.desktop.position(hwnd, obj.capture.get_abs_cords(x, y))
+                            x, y = round(obj.capture.width / 2), round(obj.capture.height / 2)
+                        if mode == "cursor-compatible":
+                            guard.desktop.foreground(hwnd)
+                            guard.desktop.position(hwnd, obj.capture.get_abs_cords(x, y))
+                            guard.count("cursor_positions")
+                        else:
+                            # Base PostMessage.move creates hover/child-window targeting
+                            # without moving the global Windows pointer.
+                            base.move(obj, x, y)
+                            guard.count("virtual_moves")
                         bound.arguments.update(x=x, y=y, move=False, move_back=False)
-                    elif name == "operate":
-                        bound.arguments.update(block=False, restore_cursor=False)
-                    else:
+                    elif name == "move_mouse_relative":
+                        if mode == "strict-no-mouse":
+                            raise Failure(
+                                "STRICT_RELATIVE_MOUSE_UNSUPPORTED",
+                                "Strict mode refuses the SendInput relative-mouse path", 26)
+                        guard.desktop.foreground(hwnd)
                         guard.desktop.position(hwnd)
+                        guard.count("cursor_positions")
+                    elif mode == "cursor-compatible":
+                        guard.desktop.foreground(hwnd)
+                        guard.desktop.position(hwnd)
+                        guard.count("cursor_positions")
+
                     result = function(*bound.args, **bound.kwargs)
                     if name == "move_mouse_relative":
+                        guard.count("send_input")
                         if result != 1:
                             raise Failure("INPUT_REJECTED", "SendInput did not insert its event", 26)
                         guard.last_input = time.monotonic()
@@ -361,11 +411,13 @@ def patch_input(cls, base, guard):
                 except Exception as error:
                     raise guard.fail(Failure("INPUT_OPERATION_FAILED", name + ": " + str(error), 26))
         return call
+
     base.post, cls.__init__ = post, init
     for name in ("_restore_cursor", "block_input", "unblock_input"):
         setattr(cls, name, lambda self: None)
     for name in names[1:8]:
         setattr(cls, name, wrap(name))
+
     def restore():
         base.post = original_post
         for name, fn in original.items():
@@ -464,11 +516,17 @@ def execute(desktop_factory=Desktop, runtime_loader=load_runtime):
     guard = instance = proof = restore = None
     code, outcome = 24, {"ok": False, "reason": "NOT_STARTED", "status": None}
     try:
-        mode = os.environ.get("GS_OK_NTE_INPUT_MODE", "unattended-desktop")
-        if mode != "unattended-desktop":
-            raise Failure("INPUT_MODE_UNSUPPORTED", "Cursor-free/locked-desktop mode is not supported", 24)
+        requested_mode = os.environ.get("GS_OK_NTE_INPUT_MODE", "cursor-compatible").strip().lower()
+        aliases = {"unattended-desktop": "cursor-compatible",
+                   "strict": "strict-no-mouse",
+                   "compat": "cursor-compatible"}
+        mode = aliases.get(requested_mode, requested_mode)
+        if mode not in ("auto", "strict-no-mouse", "cursor-compatible"):
+            raise Failure("INPUT_MODE_UNSUPPORTED",
+                          "Expected auto, strict-no-mouse, or cursor-compatible", 24)
         with desktop_factory() as desktop:
-            guard = Guard(desktop)
+            guard = Guard(desktop, mode=mode, requested_mode=requested_mode)
+            emit("INPUT_MODE_REQUESTED", requested=requested_mode, selected=mode)
             if os.environ.get("GS_OK_NTE_DOCTOR") == "1":
                 outcome.update(reason="DESKTOP_CHECK_ONLY", desktop_ready=True)
                 return 28, outcome  # Diagnostic is never daily-task success.
@@ -488,15 +546,25 @@ def execute(desktop_factory=Desktop, runtime_loader=load_runtime):
                             restore_input()
                 proof = Proof(task, guard)
                 events.task_done.connect(proof.on_done)
-                emit("TASK_DISPATCH", input_mode=mode, task_class=type(task).__name__)
+                emit("TASK_DISPATCH", input_mode=guard.mode, requested_input_mode=requested_mode,
+                     task_class=type(task).__name__)
                 guard.launch_deadline = time.monotonic() + guard.launch_budget
                 instance.run_onetime_task(task, exit_after=True)
-                outcome.update(ok=True, reason="TASK_COMPLETED", status=proof.verify())
+                status = proof.verify()
+                audit = guard.verify_input_contract()
+                outcome.update(ok=True, reason="TASK_COMPLETED", status=status,
+                               input_mode=guard.mode, requested_input_mode=requested_mode,
+                               input_audit=audit)
+                emit("INPUT_AUDIT", input_mode=guard.mode, audit=audit)
                 code = 0
             finally:
                 guard.stop.set()
                 if proof:
                     outcome["status"] = getattr(proof.task, "task_status", None)
+                if guard:
+                    outcome["input_mode"] = guard.mode
+                    outcome["requested_input_mode"] = guard.requested_mode
+                    outcome["input_audit"] = guard.audit_snapshot()
                 instance = instance or guard.instance
                 if instance:
                     done = threading.Event()
