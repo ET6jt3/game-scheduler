@@ -4,9 +4,9 @@ Unzip the entire folder, then double-click **Start.cmd**. **Stop.cmd** requests 
 
 Open **Helpers** to register external or managed installations, set discovery roots, preflight commands, and create tasks. Use the main dashboard to add cron plans. Helper executable paths may point anywhere. Disabling an instance blocks its tasks. Removing its registration does not delete any helper files; tasks still referring to it fail preflight explicitly.
 
-For ok-nte, select `task`, enter the task index shown by your installed helper, and choose exit-after-task. Raw argv is also available. No task-number meanings are assumed. Preflight never launches a game.
+For ok-nte, select `task`, enter the task index shown by your installed helper, and choose exit-after-task. Raw argv is also available. No task-number meanings are assumed. Preflight never launches a game. The upstream PC LauncherTask requires administrator rights. For a manual ok-nte trial, use **Run-Elevated.cmd**; it safely stops a non-elevated scheduler first and restarts the portable package through Windows UAC.
 
-Edit `Config/config.json` after its first creation to change the port or API token. Default: `127.0.0.1:8080`, concurrency 1. If a helper requires administrator access, explicitly run Start.cmd as Administrator. Helpers are installed separately.
+Edit `Config/config.json` after its first creation to change the port or API token. Default: `127.0.0.1:8080`, concurrency 1. If a helper requires administrator access, use **Run-Elevated.cmd** for a manual session. For unattended logon, **Setup-Startup.cmd** registers the scheduler for the current signed-in user with the highest available run level; this is a one-time setup that may show UAC. Helpers are installed separately.
 
 `${ROOT}` means the **App** folder containing server.exe. The supplied config sets `${DATA}`, `${HELPERS}`, and `${RUNTIME}` to sibling folders. Stop before moving the whole package. Variable paths relocate; absolute external paths do not change. Do not copy a running SQLite database; stop first and copy Data into Backups.
 
