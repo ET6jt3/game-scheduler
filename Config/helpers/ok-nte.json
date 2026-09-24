@@ -33,17 +33,7 @@
           "type": "enum",
           "default": "native",
           "enum": [
-            "native",
-            "adapted"
-          ]
-        },
-        "input_mode": {
-          "type": "enum",
-          "default": "cursor-compatible",
-          "enum": [
-            "cursor-compatible",
-            "strict-no-mouse",
-            "auto"
+            "native"
           ]
         }
       },
