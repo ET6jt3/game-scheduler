@@ -59,8 +59,10 @@ try{
  if(!(Test-Path (Join-Path $second 'Data\preserve.txt'))){throw 'Migration did not copy Data'}
  if((Get-Content (Join-Path $second 'Config\config.json') -Raw) -notmatch '18080'){throw 'Migration did not copy config.json'}
  if(!(Test-Path (Join-Path $second 'Helpers\managed-marker.txt')) -or !(Test-Path (Join-Path $second 'Runtime\runtime-marker.txt'))){throw 'Migration did not copy managed helper/runtime state'}
- $newNte=Get-Content -LiteralPath (Join-Path $second 'Config\helpers\ok-nte.json') -Raw
- if($newNte -notmatch '"lifecycle_mode"' -or $newNte -notmatch '"native"'){throw 'Migration overwrote current ok-nte lifecycle definition'}
+ $newNte=Get-Content -LiteralPath (Join-Path $second 'Config\helpers\ok-nte.json') -Raw | ConvertFrom-Json
+ if($newNte.launch.worker.bootstrap -ne 'runtime-services'){throw 'Migration overwrote current ok-nte native worker definition'}
+ if(@($newNte.task_types.task.fields.PSObject.Properties).Count -ne 0){throw 'Production ok-nte task unexpectedly exposes lifecycle/input controls'}
+ if(($newNte.task_types.task.args -join ' ') -ne '-t 2 -e --headless'){throw 'Migration changed current ok-nte DailyRoutineTask entry'}
  if(!(Test-Path -LiteralPath (Join-Path $second 'Config\helpers\user-custom.json'))){throw 'Migration did not copy user-added helper definition'}
  $migrationBackup=Get-ChildItem (Join-Path $second 'Backups') -Directory | Where-Object Name -like 'pre-migration-*' | Select-Object -First 1
  if(!$migrationBackup){throw 'Migration did not create safety backup'}
