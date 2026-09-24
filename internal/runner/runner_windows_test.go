@@ -4,6 +4,7 @@ package runner
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"os/exec"
 	"strconv"
@@ -116,4 +117,23 @@ func TestJobCloseKillsChild(t *testing.T) {
 	release() // close the job handle without touching the process
 
 	waitPid(t, helper.Process.Pid, false, 10*time.Second)
+}
+
+// A launcher returning zero is not success if it left work in its child tree.
+func TestChainRejectsLauncherOnlySuccess(t *testing.T) {
+	spec := helperSpec("spawn_exit")
+	spec.RequireCompleteTree = true
+	result := Run(context.Background(), spec)
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "completion is unknown") {
+		t.Fatalf("launcher incorrectly completed: %+v", result)
+	}
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if raw, ok := strings.CutPrefix(line, "GCPID="); ok {
+			id, err := strconv.Atoi(strings.TrimSpace(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitPid(t, id, false, 5*time.Second)
+		}
+	}
 }

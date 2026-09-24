@@ -1,5 +1,8 @@
 # game-scheduler
 
+For the portable Windows helper-hub build, run **`Build.cmd`**. It provisions Go
+inside this repository automatically. See [portable build instructions](BUILD-PORTABLE.md).
+
 > 🌏 **中文文档见 [README.md](README.md)** · English below.
 
 [![CI](https://github.com/xiabee/game-scheduler/actions/workflows/ci.yml/badge.svg)](https://github.com/xiabee/game-scheduler/actions/workflows/ci.yml)

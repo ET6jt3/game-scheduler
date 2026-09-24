@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/xiabee/game-scheduler/internal/chains"
 	"github.com/xiabee/game-scheduler/internal/config"
 	"github.com/xiabee/game-scheduler/internal/events"
 	"github.com/xiabee/game-scheduler/internal/game"
@@ -27,21 +28,24 @@ import (
 	"github.com/xiabee/game-scheduler/internal/task"
 )
 
-//go:embed web/index.html
+//go:embed web/index.html web/helpers.html web/automation.html
 var webFS embed.FS
 
 // Server holds dependencies for the HTTP handlers.
 type Server struct {
-	store         *store.Store
-	svc           *task.Service
-	sched         *scheduler.Scheduler
-	reg           *game.Registry
-	bus           *events.Bus
-	mon           *monitor.Monitor
-	guides        guide.Searcher
-	log           *slog.Logger
-	screenshotDir string
-	authToken     string
+	Chains          *chains.Engine
+	RequestShutdown func()
+	root            string
+	store           *store.Store
+	svc             *task.Service
+	sched           *scheduler.Scheduler
+	reg             *game.Registry
+	bus             *events.Bus
+	mon             *monitor.Monitor
+	guides          guide.Searcher
+	log             *slog.Logger
+	screenshotDir   string
+	authToken       string
 
 	streamsClosing   sync.Once
 	streamsClosingCh chan struct{} // closed by ShutdownStreams
@@ -65,6 +69,7 @@ func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *gam
 	}
 	return &Server{
 		store:            s,
+		root:             cfg.Root,
 		svc:              svc,
 		sched:            sched,
 		reg:              reg,
@@ -82,13 +87,24 @@ func New(s *store.Store, svc *task.Service, sched *scheduler.Scheduler, reg *gam
 // Handler returns the configured HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.helperRoutes(mux)
+	s.chainRoutes(mux)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "adapters": s.reg.Keys()})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "adapters": s.reg.Keys(), "root": s.root})
 	})
 
 	// Control dashboard (single embedded page) + its aggregate feed + live stream.
 	mux.HandleFunc("GET /{$}", s.index)
+	mux.HandleFunc("GET /helpers", func(w http.ResponseWriter, r *http.Request) {
+		b, err := webFS.ReadFile("web/helpers.html")
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(b)
+	})
 	mux.HandleFunc("GET /api/dashboard", s.dashboard)
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("GET /api/meta", s.meta)
@@ -430,6 +446,14 @@ func (s *Server) validTaskType(w http.ResponseWriter, t store.Task) bool {
 	// the adapter TaskTypes check does not apply.
 	if t.Type == "native" {
 		return true
+	}
+	if s.svc != nil && s.svc.Helpers != nil {
+		var e error
+		g, _, _, e = s.svc.Helpers.Resolve(g, t)
+		if e != nil {
+			writeErr(w, 400, e)
+			return false
+		}
 	}
 	ad, err := s.reg.Get(g.Adapter)
 	if err != nil {

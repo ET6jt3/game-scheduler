@@ -520,3 +520,30 @@ func TestRunDoesNotRetryUnlaunchedProcess(t *testing.T) {
 		t.Errorf("error_msg=%q, want failed-to-start cause", got.ErrorMsg)
 	}
 }
+
+func TestChainExecutionPolicyWaitsForNaturalCompletionByDefault(t *testing.T) {
+	task := store.Task{TimeoutSec: 900, Params: `{}`}
+	spec := runner.Spec{Timeout: 15 * time.Minute}
+	applyChainExecutionPolicy("chain", task, &spec)
+	if spec.Timeout != 0 {
+		t.Fatalf("chain should ignore legacy hard timeout by default, got %s", spec.Timeout)
+	}
+}
+
+func TestChainExecutionPolicyCanOptIntoHardTimeout(t *testing.T) {
+	task := store.Task{TimeoutSec: 900, Params: `{"chain_hard_timeout":true}`}
+	spec := runner.Spec{Timeout: 15 * time.Minute}
+	applyChainExecutionPolicy("chain", task, &spec)
+	if spec.Timeout != 15*time.Minute {
+		t.Fatalf("explicit chain hard timeout changed: %s", spec.Timeout)
+	}
+}
+
+func TestManualExecutionRetainsTaskTimeout(t *testing.T) {
+	task := store.Task{TimeoutSec: 900, Params: `{}`}
+	spec := runner.Spec{Timeout: 15 * time.Minute}
+	applyChainExecutionPolicy(store.TriggerManual, task, &spec)
+	if spec.Timeout != 15*time.Minute {
+		t.Fatalf("manual timeout should remain intact: %s", spec.Timeout)
+	}
+}
