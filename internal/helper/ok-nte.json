@@ -31,8 +31,9 @@
       "fields": {
         "input_mode": {
           "type": "enum",
-          "default": "cursor-compatible",
+          "default": "native",
           "enum": [
+            "native",
             "cursor-compatible",
             "strict-no-mouse",
             "auto"
