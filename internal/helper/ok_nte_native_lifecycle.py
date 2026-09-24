@@ -8,6 +8,7 @@ provides deterministic process-level diagnostics.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import os
 import sys
@@ -81,6 +82,238 @@ def select_native_tasks(instance):
             24,
         )
     return daily[0], launcher[0]
+
+
+class LauncherCaptureObserver:
+    """Observe the native launcher capture without changing OK-NTE behavior."""
+
+    def __init__(self, instance, launcher):
+        self.instance = instance
+        self.launcher = launcher
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.last_signature = None
+        self.last_hash = None
+        self.same_hash_since = None
+        self.last_snapshot = 0.0
+        self.snapshot_index = 0
+        self.directory = None
+        base = os.environ.get("GS_OK_NTE_EVENT_DIR")
+        if base:
+            self.directory = os.path.join(base, "launcher-capture")
+            try:
+                os.makedirs(self.directory, exist_ok=True)
+            except OSError:
+                self.directory = None
+
+    def start(self):
+        self.thread = threading.Thread(
+            target=self._run,
+            name="GS-NTE-LauncherCaptureObserver",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread and self.thread is not threading.current_thread():
+            self.thread.join(timeout=3)
+
+    def _window_metadata(self, hwnd_window):
+        data = {
+            "hwnd": int(getattr(hwnd_window, "hwnd", 0) or 0),
+            "top_hwnd": int(getattr(hwnd_window, "top_hwnd", 0) or 0),
+            "exists": bool(getattr(hwnd_window, "exists", False)),
+            "visible": bool(getattr(hwnd_window, "visible", False)),
+            "pos_valid": bool(getattr(hwnd_window, "pos_valid", False)),
+            "x": int(getattr(hwnd_window, "x", 0) or 0),
+            "y": int(getattr(hwnd_window, "y", 0) or 0),
+            "width": int(getattr(hwnd_window, "width", 0) or 0),
+            "height": int(getattr(hwnd_window, "height", 0) or 0),
+            "window_width": int(getattr(hwnd_window, "window_width", 0) or 0),
+            "window_height": int(getattr(hwnd_window, "window_height", 0) or 0),
+            "client_width": int(getattr(hwnd_window, "client_width", 0) or 0),
+            "client_height": int(getattr(hwnd_window, "client_height", 0) or 0),
+            "real_x_offset": int(getattr(hwnd_window, "real_x_offset", 0) or 0),
+            "real_y_offset": int(getattr(hwnd_window, "real_y_offset", 0) or 0),
+            "real_width": int(getattr(hwnd_window, "real_width", 0) or 0),
+            "real_height": int(getattr(hwnd_window, "real_height", 0) or 0),
+        }
+        hwnd = data["hwnd"]
+        if hwnd and os.name == "nt":
+            try:
+                import win32gui
+                import win32process
+                data["class_name"] = win32gui.GetClassName(hwnd)
+                data["title"] = win32gui.GetWindowText(hwnd)
+                data["window_rect"] = list(win32gui.GetWindowRect(hwnd))
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                data["pid"] = int(pid)
+            except Exception as error:
+                data["win32_error"] = type(error).__name__ + ": " + str(error)
+        return data
+
+    def _write_snapshot(self, frame, metadata, reason):
+        if self.directory is None:
+            return None
+        self.snapshot_index += 1
+        stamp = "%d-%03d" % (time.time_ns(), self.snapshot_index)
+        png_path = os.path.join(self.directory, "launcher-%s.png" % stamp)
+        json_path = os.path.join(self.directory, "launcher-%s.json" % stamp)
+        try:
+            import cv2
+            ok, encoded = cv2.imencode(".png", frame)
+            if ok:
+                encoded.tofile(png_path)
+            else:
+                png_path = None
+        except Exception as error:
+            metadata["snapshot_error"] = type(error).__name__ + ": " + str(error)
+            png_path = None
+        metadata = dict(metadata)
+        metadata["reason"] = reason
+        metadata["snapshot_png"] = png_path
+        try:
+            with open(json_path, "x", encoding="utf-8") as handle:
+                json.dump(metadata, handle, ensure_ascii=True, indent=2, default=str)
+        except OSError:
+            json_path = None
+        emit(
+            "LAUNCHER_CAPTURE_SNAPSHOT",
+            reason=reason,
+            png=png_path,
+            metadata=json_path,
+            frame_hash=metadata.get("frame_hash"),
+            hwnd=metadata.get("hwnd"),
+            window_rect=metadata.get("window_rect"),
+            pos_valid=metadata.get("pos_valid"),
+        )
+        return png_path
+
+    def _sample(self):
+        executor = self.instance.task_executor
+        if getattr(executor, "current_task", None) is not self.launcher:
+            return
+        device_manager = getattr(executor, "device_manager", None)
+        capture = getattr(device_manager, "capture_method", None)
+        hwnd_window = getattr(device_manager, "hwnd_window", None)
+        if capture is None or hwnd_window is None:
+            emit("LAUNCHER_CAPTURE_UNAVAILABLE")
+            return
+
+        metadata = self._window_metadata(hwnd_window)
+        metadata["capture_method"] = type(capture).__name__
+        metadata["capture_connected"] = bool(capture.connected())
+        metadata["capture_target_signature"] = repr(
+            getattr(hwnd_window, "capture_target_signature", None)
+        )
+        try:
+            frame = capture.get_frame()
+        except Exception as error:
+            emit(
+                "LAUNCHER_CAPTURE_ERROR",
+                error=type(error).__name__ + ": " + str(error),
+                **metadata,
+            )
+            return
+        if frame is None:
+            emit("LAUNCHER_CAPTURE_EMPTY", **metadata)
+            return
+
+        metadata["frame_shape"] = list(getattr(frame, "shape", ()))
+        try:
+            raw = memoryview(frame).cast("B")
+            digest = hashlib.sha256(raw).hexdigest()
+        except Exception:
+            digest = hashlib.sha256(frame.tobytes()).hexdigest()
+        metadata["frame_hash"] = digest
+
+        signature = (
+            metadata["hwnd"],
+            metadata["top_hwnd"],
+            metadata["x"],
+            metadata["y"],
+            metadata["width"],
+            metadata["height"],
+            metadata["capture_target_signature"],
+        )
+        now = time.monotonic()
+        reason = None
+        if self.last_signature != signature:
+            reason = "target-signature-changed" if self.last_signature is not None else "launcher-observer-start"
+            emit(
+                "LAUNCHER_CAPTURE_TARGET",
+                previous=repr(self.last_signature),
+                current=repr(signature),
+                **metadata,
+            )
+            self.last_signature = signature
+
+        if self.last_hash == digest:
+            if self.same_hash_since is None:
+                self.same_hash_since = now
+            stale_seconds = now - self.same_hash_since
+            metadata["stale_seconds"] = round(stale_seconds, 3)
+            if stale_seconds >= 15:
+                emit(
+                    "LAUNCHER_CAPTURE_STALE",
+                    stale_seconds=round(stale_seconds, 3),
+                    frame_hash=digest,
+                    hwnd=metadata["hwnd"],
+                    window_rect=metadata.get("window_rect"),
+                    pos_valid=metadata["pos_valid"],
+                )
+                if now - self.last_snapshot >= 30:
+                    reason = reason or "stale-frame"
+        else:
+            if self.last_hash is not None:
+                emit(
+                    "LAUNCHER_CAPTURE_CHANGED",
+                    previous_hash=self.last_hash,
+                    frame_hash=digest,
+                    hwnd=metadata["hwnd"],
+                )
+                reason = reason or "frame-changed"
+            self.last_hash = digest
+            self.same_hash_since = now
+
+        if not metadata["pos_valid"]:
+            emit(
+                "LAUNCHER_CAPTURE_POSITION_INVALID",
+                hwnd=metadata["hwnd"],
+                x=metadata["x"],
+                y=metadata["y"],
+                width=metadata["width"],
+                height=metadata["height"],
+                window_rect=metadata.get("window_rect"),
+            )
+            if now - self.last_snapshot >= 10:
+                reason = reason or "position-invalid"
+
+        if reason and (now - self.last_snapshot >= 5 or reason == "launcher-observer-start"):
+            self._write_snapshot(frame, metadata, reason)
+            self.last_snapshot = now
+
+    def _run(self):
+        active = False
+        while not self.stop_event.wait(2):
+            try:
+                is_launcher = getattr(
+                    self.instance.task_executor, "current_task", None
+                ) is self.launcher
+                if is_launcher and not active:
+                    active = True
+                    emit("LAUNCHER_CAPTURE_OBSERVER_ACTIVE")
+                elif active and not is_launcher:
+                    emit("LAUNCHER_CAPTURE_OBSERVER_IDLE")
+                    active = False
+                if is_launcher:
+                    self._sample()
+            except BaseException as error:
+                emit(
+                    "LAUNCHER_CAPTURE_OBSERVER_ERROR",
+                    error=type(error).__name__ + ": " + str(error),
+                )
 
 
 class Proof:
@@ -185,6 +418,7 @@ def execute(runtime_loader=load_runtime, elevation_check=is_elevated):
     instance = None
     proof = None
     events = None
+    observer = None
     outcome = {
         "ok": False,
         "reason": "NOT_STARTED",
@@ -205,6 +439,8 @@ def execute(runtime_loader=load_runtime, elevation_check=is_elevated):
         instance, task, launcher, events = runtime_loader()
         proof = Proof(task)
         events.task_done.connect(proof.on_done)
+        observer = LauncherCaptureObserver(instance, launcher)
+        observer.start()
 
         emit(
             "NATIVE_LIFECYCLE_BEGIN",
@@ -241,6 +477,8 @@ def execute(runtime_loader=load_runtime, elevation_check=is_elevated):
             message=type(error).__name__ + ": " + str(error),
         )
     finally:
+        if observer is not None:
+            observer.stop()
         if proof is not None:
             outcome["status"] = getattr(proof.task, "task_status", None)
             try:
