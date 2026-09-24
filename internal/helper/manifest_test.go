@@ -57,8 +57,16 @@ func TestNTEWorkerCommand(t *testing.T) {
 	if spec.Path != workerExe || spec.Dir != workerDir || len(spec.Args) != 2 || spec.Args[0] != "-c" || spec.Args[1] != okNTEHeadlessBootstrap || spec.Timeout.Seconds() != 37 || !spec.PreserveTimeoutInChain || spec.CompletionMarker != "" {
 		t.Fatalf("worker spec=%+v", spec)
 	}
-	if !reflect.DeepEqual(spec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1"}) {
+	if !reflect.DeepEqual(spec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_INPUT_MODE=cursor-compatible"}) {
 		t.Fatalf("worker env=%v", spec.Env)
+	}
+	strictTask := store.Task{Type: "task", Params: `{"input_mode":"strict-no-mouse"}`}
+	strictSpec, e := d.BuildCommand(g, strictTask)
+	if e != nil || !reflect.DeepEqual(strictSpec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_INPUT_MODE=strict-no-mouse"}) {
+		t.Fatalf("strict worker env=%v err=%v", strictSpec.Env, e)
+	}
+	if _, e := d.BuildCommand(g, store.Task{Type: "task", Params: `{"input_mode":"invalid"}`}); e == nil {
+		t.Fatal("invalid ok-nte input mode accepted")
 	}
 	entryPath, ok := d.WorkerEntryPath(g, task, spec)
 	if !ok || entryPath != entry {
