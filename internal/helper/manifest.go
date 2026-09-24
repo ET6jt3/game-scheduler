@@ -432,34 +432,15 @@ func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, erro
 			PreserveTimeoutInChain: d.Launch.Worker.PreserveTimeoutInChain,
 		}
 		if d.Launch.Worker.Bootstrap == "runtime-services" {
-			lifecycle := "native"
-			if raw, ok := p["lifecycle_mode"].(string); ok && strings.TrimSpace(raw) != "" {
-				lifecycle = raw
-			} else if field, ok := d.TaskTypesMap[t.Type].Fields["lifecycle_mode"]; ok {
-				if value, ok := field.Default.(string); ok && value != "" {
-					lifecycle = value
-				}
-			}
+			// Production OK-NTE tasks always use upstream native lifecycle
+			// ownership. Historical input/lifecycle fields in saved task JSON are
+			// intentionally ignored so stale records cannot reactivate the
+			// experimental launcher/input adapter.
+			spec.Args = []string{"-c", okNTENativeLifecycleBootstrap}
 			spec.Env = append(spec.Env,
 				"PYTHONIOENCODING=utf-8",
-				"PYTHONUTF8=1")
-			if lifecycle == "native" {
-				spec.Args = []string{"-c", okNTENativeLifecycleBootstrap}
-				spec.Env = append(spec.Env, "GS_OK_NTE_LIFECYCLE=native")
-			} else {
-				mode := "cursor-compatible"
-				if raw, ok := p["input_mode"].(string); ok && strings.TrimSpace(raw) != "" {
-					mode = raw
-				} else if field, ok := d.TaskTypesMap[t.Type].Fields["input_mode"]; ok {
-					if value, ok := field.Default.(string); ok && value != "" {
-						mode = value
-					}
-				}
-				spec.Args = []string{"-c", okNTEHeadlessBootstrap}
-				spec.Env = append(spec.Env,
-					"GS_OK_NTE_LIFECYCLE=adapted",
-					"GS_OK_NTE_INPUT_MODE="+mode)
-			}
+				"PYTHONUTF8=1",
+				"GS_OK_NTE_LIFECYCLE=native")
 		}
 		if d.Completion.Marker != "" {
 			spec.CompletionMarker = d.Completion.Marker
