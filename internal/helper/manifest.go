@@ -433,7 +433,18 @@ func (d *Definition) BuildCommand(g store.Game, t store.Task) (runner.Spec, erro
 		}
 		if d.Launch.Worker.Bootstrap == "runtime-services" {
 			spec.Args = []string{"-c", okNTEHeadlessBootstrap}
-			spec.Env = append(spec.Env, "PYTHONIOENCODING=utf-8", "PYTHONUTF8=1")
+			mode := "cursor-compatible"
+			if raw, ok := p["input_mode"].(string); ok && strings.TrimSpace(raw) != "" {
+				mode = raw
+			} else if field, ok := d.TaskTypesMap[t.Type].Fields["input_mode"]; ok {
+				if value, ok := field.Default.(string); ok && value != "" {
+					mode = value
+				}
+			}
+			spec.Env = append(spec.Env,
+				"PYTHONIOENCODING=utf-8",
+				"PYTHONUTF8=1",
+				"GS_OK_NTE_INPUT_MODE="+mode)
 		}
 		if d.Completion.Marker != "" {
 			spec.CompletionMarker = d.Completion.Marker
