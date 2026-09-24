@@ -176,6 +176,11 @@ class Tests(unittest.TestCase):
             observer.last_stale_emit = 0
             observer._sample()
             self.assertTrue(any(event == "LAUNCHER_CAPTURE_STALE" for event, _ in events))
+
+            instance.launcher.frame = FakeFrame(b"xyz")
+            observer.same_hash_since = time.monotonic() - 20
+            observer._sample()
+            self.assertTrue(any(event == "LAUNCHER_CAPTURE_RECOVERED" for event, _ in events))
         finally:
             native.emit = original_emit
 
