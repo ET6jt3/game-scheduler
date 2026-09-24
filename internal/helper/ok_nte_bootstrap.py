@@ -324,108 +324,7 @@ class Guard:
         threading.Thread(target=monitor, name="GSDesktopWatchdog", daemon=True).start()
 
 
-def patch_input(cls, base, guard):
-    names = ("__init__", "click", "operate", "scroll", "send_key", "send_key_down",
-             "send_key_up", "move_mouse_relative", "_restore_cursor", "block_input", "unblock_input")
-    original = {name: getattr(cls, name, None) for name in names}
-    if not all(callable(fn) for fn in original.values()) or not callable(getattr(base, "post", None)):
-        raise Failure("INPUT_BACKEND_UNSUPPORTED", "Required NTE input interface missing", 24)
-    for name, keys in (("click", ("x", "y", "move", "move_back")),
-                       ("operate", ("block", "restore_cursor"))):
-        if not all(key in inspect.signature(original[name]).parameters for key in keys):
-            raise Failure("INPUT_BACKEND_UNSUPPORTED", "NTE signature changed: " + name, 24)
-    original_post = base.post
-
-    def post(obj, message, wParam=0, lParam=0, hwnd=None):
-        try:
-            guard.check()
-            guard.desktop.post(obj.hwnd if hwnd is None else hwnd, message, wParam, lParam)
-            if 0x100 <= message <= 0x109 or 0x200 <= message <= 0x20E:
-                guard.last_input = time.monotonic()
-                guard.count("post_messages")
-        except Failure as error:
-            raise guard.fail(error)
-
-    def init(obj, *args, **kwargs):
-        original["__init__"](obj, *args, **kwargs)
-        sync = getattr(obj, "_cursor_sync", None)
-        if not callable(getattr(sync, "stop", None)):
-            raise guard.fail(Failure("INPUT_BACKEND_UNSUPPORTED", "CursorSync interface missing", 24))
-        sync.stop()
-        thread = getattr(sync, "_thread", None)
-        if thread and thread is not threading.current_thread():
-            thread.join(1)
-            if thread.is_alive():
-                raise guard.fail(Failure("CURSOR_SYNC_STOP_FAILED", "Cursor synchronization did not stop", 26))
-
-    def wrap(name):
-        function, signature = original[name], inspect.signature(original[name])
-        @functools.wraps(function)
-        def call(obj, *args, **kwargs):
-            with obj._input_lock:
-                try:
-                    guard.check()
-                    hwnd = obj.hwnd_window.hwnd
-                    bound = signature.bind(obj, *args, **kwargs)
-                    bound.apply_defaults()
-                    mode = guard.mode
-                    if name == "operate":
-                        bound.arguments.update(block=False, restore_cursor=False)
-                    elif name == "click":
-                        x, y = bound.arguments["x"], bound.arguments["y"]
-                        if x < 0 or y < 0:
-                            x, y = round(obj.capture.width / 2), round(obj.capture.height / 2)
-                        if mode == "cursor-compatible":
-                            guard.desktop.foreground(hwnd)
-                            guard.desktop.position(hwnd, obj.capture.get_abs_cords(x, y))
-                            guard.count("cursor_positions")
-                        else:
-                            # Base PostMessage.move creates hover/child-window targeting
-                            # without moving the global Windows pointer.
-                            base.move(obj, x, y)
-                            guard.count("virtual_moves")
-                        bound.arguments.update(x=x, y=y, move=False, move_back=False)
-                    elif name == "move_mouse_relative":
-                        if mode == "strict-no-mouse":
-                            raise Failure(
-                                "STRICT_RELATIVE_MOUSE_UNSUPPORTED",
-                                "Strict mode refuses the SendInput relative-mouse path", 26)
-                        guard.desktop.foreground(hwnd)
-                        guard.desktop.position(hwnd)
-                        guard.count("cursor_positions")
-                    elif mode == "cursor-compatible":
-                        guard.desktop.foreground(hwnd)
-                        guard.desktop.position(hwnd)
-                        guard.count("cursor_positions")
-
-                    result = function(*bound.args, **bound.kwargs)
-                    if name == "move_mouse_relative":
-                        guard.count("send_input")
-                        if result != 1:
-                            raise Failure("INPUT_REJECTED", "SendInput did not insert its event", 26)
-                        guard.last_input = time.monotonic()
-                    guard.check()
-                    return result
-                except Failure as error:
-                    raise guard.fail(error)
-                except Exception as error:
-                    raise guard.fail(Failure("INPUT_OPERATION_FAILED", name + ": " + str(error), 26))
-        return call
-
-    base.post, cls.__init__ = post, init
-    for name in ("_restore_cursor", "block_input", "unblock_input"):
-        setattr(cls, name, lambda self: None)
-    for name in names[1:8]:
-        setattr(cls, name, wrap(name))
-
-    def restore():
-        base.post = original_post
-        for name, fn in original.items():
-            setattr(cls, name, fn)
-    return restore
-
-
-from _gs_nte_launcher import patch_launcher
+from _gs_nte_launcher import patch_input, patch_launcher
 
 
 class Proof:
@@ -491,7 +390,7 @@ def load_runtime(guard):
     install_startup_patches(config)
     from src.interaction.NTEInteraction import NTEInteraction
     from ok.device.intercation import PostMessageInteraction
-    restore = patch_input(NTEInteraction, PostMessageInteraction, guard)
+    restore = patch_input(NTEInteraction, PostMessageInteraction, guard, Failure)
     import ok
     from ok.core.events import communicate
     instance = ok.OK(config)
