@@ -12,6 +12,7 @@ import os
 import threading
 import shutil
 import subprocess
+import sys
 import time
 import types
 from ctypes import wintypes as W
@@ -259,6 +260,10 @@ def patch_launcher(task, guard, Failure, emit, compat_driver=desktop_click,
     """Wrap only the loaded LauncherTask instance, without editing helper files."""
     names = ('run', 'click', '_launcher_button_state')
     original = {name: getattr(task, name, None) for name in names}
+    launcher_module = sys.modules.get(type(task).__module__)
+    original_dismiss = getattr(launcher_module, 'dismiss_screensaver', None) if launcher_module else None
+    screen_module = sys.modules.get(getattr(original_dismiss, '__module__', '')) if original_dismiss else None
+    is_screensaver_running = getattr(screen_module, 'is_screensaver_running', None)
     if not all(callable(fn) for fn in original.values()):
         raise Failure('LAUNCHER_INTERFACE_UNSUPPORTED', 'LauncherTask interface changed', 24)
     try:
@@ -397,9 +402,25 @@ def patch_launcher(task, guard, Failure, emit, compat_driver=desktop_click,
         finally:
             guard.launch_deadline = None
 
+    def safe_dismiss_screensaver():
+        mode = getattr(guard, 'mode', 'cursor-compatible')
+        if mode in ('strict-no-mouse', 'auto'):
+            if callable(is_screensaver_running) and is_screensaver_running():
+                raise guard.fail(Failure(
+                    'SCREENSAVER_ACTIVE',
+                    'Strict/auto mode refuses cursor-based screen-saver dismissal', 21))
+            # Unknown/unavailable state is left untouched rather than synthesizing
+            # user activity. Desktop/capture readiness remains independently checked.
+            return False
+        if callable(original_dismiss):
+            return original_dismiss()
+        return False
+
     task.run = types.MethodType(run, task)
     task.click = types.MethodType(click, task)
     task._launcher_button_state = types.MethodType(button_state, task)
+    if launcher_module is not None and callable(original_dismiss):
+        launcher_module.dismiss_screensaver = safe_dismiss_screensaver
 
     def restore():
         for name, method in original.items():
@@ -407,4 +428,6 @@ def patch_launcher(task, guard, Failure, emit, compat_driver=desktop_click,
                 setattr(task, name, method)
             elif name in vars(task):
                 delattr(task, name)
+        if launcher_module is not None and callable(original_dismiss):
+            launcher_module.dismiss_screensaver = original_dismiss
     return restore
