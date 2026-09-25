@@ -70,6 +70,14 @@ class FakeCapture:
         return self.frame
 
 
+class WindowsGraphicsCaptureMethod(FakeCapture):
+    pass
+
+
+class SavedConfig(dict):
+    config_file = r"C:\ok-nte\working\configs\devices.json"
+
+
 class FakeHwndWindow:
     hwnd = 123
     top_hwnd = 123
@@ -115,6 +123,34 @@ class FakeInstance:
 
 
 class Tests(unittest.TestCase):
+    def test_force_wgc_allowed_removes_bitblt_fallback(self):
+        config = {
+            "windows": {
+                "capture_method": ["WGC", "BitBlt_RenderFull"],
+            }
+        }
+        previous = native.force_wgc_allowed(config)
+        self.assertEqual(previous, ["WGC", "BitBlt_RenderFull"])
+        self.assertEqual(config["windows"]["capture_method"], ["WGC"])
+
+    def test_force_wgc_selected_persists_runtime_devices_config(self):
+        device_config = SavedConfig(capture="BitBlt_RenderFull")
+        device_manager = types.SimpleNamespace(
+            windows_capture_config={
+                "capture_method": ["WGC", "BitBlt_RenderFull"],
+            },
+            config=device_config,
+        )
+        instance = types.SimpleNamespace(device_manager=device_manager)
+        previous, path = native.force_wgc_selected(instance)
+        self.assertEqual(previous, "BitBlt_RenderFull")
+        self.assertEqual(device_config["capture"], "WGC")
+        self.assertEqual(
+            device_manager.windows_capture_config["capture_method"],
+            ["WGC"],
+        )
+        self.assertEqual(path, SavedConfig.config_file)
+
     def test_selects_native_daily_and_launcher(self):
         instance = FakeInstance()
         daily, launcher = native.select_native_tasks(instance)
@@ -154,7 +190,7 @@ class Tests(unittest.TestCase):
 
     def test_launcher_capture_observer_reports_target_and_stale_frame(self):
         instance = FakeInstance()
-        capture = FakeCapture()
+        capture = WindowsGraphicsCaptureMethod()
         instance.task_executor.current_task = instance.launcher
         instance.launcher.frame = capture.frame
         instance.task_executor.device_manager = types.SimpleNamespace(
@@ -181,6 +217,29 @@ class Tests(unittest.TestCase):
             observer.same_hash_since = time.monotonic() - 20
             observer._sample()
             self.assertTrue(any(event == "LAUNCHER_CAPTURE_RECOVERED" for event, _ in events))
+        finally:
+            native.emit = original_emit
+
+    def test_launcher_capture_observer_flags_non_wgc_backend(self):
+        instance = FakeInstance()
+        capture = FakeCapture()
+        instance.task_executor.current_task = instance.launcher
+        instance.launcher.frame = capture.frame
+        instance.task_executor.device_manager = types.SimpleNamespace(
+            capture_method=capture,
+            hwnd_window=FakeHwndWindow(),
+        )
+        observer = native.LauncherCaptureObserver(instance, instance.launcher)
+        events = []
+        original_emit = native.emit
+        try:
+            native.emit = lambda event, **data: events.append((event, data))
+            observer._sample()
+            self.assertEqual(observer.backend_mismatch, "FakeCapture")
+            self.assertTrue(any(
+                event == "LAUNCHER_CAPTURE_BACKEND_MISMATCH"
+                for event, _ in events
+            ))
         finally:
             native.emit = original_emit
 
