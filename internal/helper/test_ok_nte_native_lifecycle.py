@@ -243,6 +243,141 @@ class Tests(unittest.TestCase):
         finally:
             native.emit = original_emit
 
+    def test_cta_watchdog_clicks_only_after_stale_frame_grace(self):
+        instance = FakeInstance()
+        instance.task_executor.current_task = instance.launcher
+        now = [100.0]
+        observer = types.SimpleNamespace(
+            last_ready_percentage=0.0,
+            same_hash_since=80.0,
+            unavailable_since=None,
+            last_hash="abc",
+        )
+        sent = []
+        state = {
+            "valid": True,
+            "game_started": False,
+            "hwnd": 123,
+            "pid": 456,
+            "class_name": "Qt51517QWindowOwnDC",
+            "title": "NTE",
+            "window_rect": [0, 0, 1920, 1080],
+            "client_size": [1920, 1080],
+        }
+        watchdog = native.LauncherPrimaryCTAWatchdog(
+            instance,
+            instance.launcher,
+            observer,
+            probe=lambda: state,
+            sender=lambda s: (sent.append(s) or True, {"reason": "posted"}),
+            clock=lambda: now[0],
+        )
+        events = []
+        original_emit = native.emit
+        try:
+            native.emit = lambda event, **data: events.append((event, data))
+            watchdog._tick()
+            self.assertEqual(sent, [])
+            now[0] = 121.0
+            watchdog._tick()
+            self.assertEqual(len(sent), 1)
+            self.assertTrue(any(
+                event == "LAUNCHER_CTA_WATCHDOG_ATTEMPT"
+                for event, _ in events
+            ))
+        finally:
+            native.emit = original_emit
+
+    def test_cta_watchdog_defers_to_native_ready_button(self):
+        instance = FakeInstance()
+        instance.task_executor.current_task = instance.launcher
+        now = [100.0]
+        observer = types.SimpleNamespace(
+            last_ready_percentage=1.0,
+            same_hash_since=70.0,
+            unavailable_since=None,
+            last_hash="abc",
+        )
+        sent = []
+        watchdog = native.LauncherPrimaryCTAWatchdog(
+            instance,
+            instance.launcher,
+            observer,
+            probe=lambda: {
+                "valid": True,
+                "game_started": False,
+                "hwnd": 123,
+                "pid": 456,
+                "class_name": "Qt51517QWindowOwnDC",
+                "title": "NTE",
+                "window_rect": [0, 0, 1920, 1080],
+                "client_size": [1920, 1080],
+            },
+            sender=lambda s: (sent.append(s) or True, {"reason": "posted"}),
+            clock=lambda: now[0],
+        )
+        watchdog._tick()
+        now[0] = 130.0
+        watchdog._tick()
+        self.assertEqual(sent, [])
+
+    def test_cta_watchdog_clicks_after_capture_unavailable(self):
+        instance = FakeInstance()
+        instance.task_executor.current_task = instance.launcher
+        now = [100.0]
+        observer = types.SimpleNamespace(
+            last_ready_percentage=None,
+            same_hash_since=None,
+            unavailable_since=100.0,
+            last_hash=None,
+        )
+        sent = []
+        watchdog = native.LauncherPrimaryCTAWatchdog(
+            instance,
+            instance.launcher,
+            observer,
+            probe=lambda: {
+                "valid": True,
+                "game_started": False,
+                "hwnd": 123,
+                "pid": 456,
+                "class_name": "Qt51517QWindowOwnDC",
+                "title": "NTE",
+                "window_rect": [0, 0, 1920, 1080],
+                "client_size": [1920, 1080],
+            },
+            sender=lambda s: (sent.append(s) or True, {"reason": "posted"}),
+            clock=lambda: now[0],
+        )
+        watchdog._tick()
+        now[0] = 121.0
+        watchdog._tick()
+        self.assertEqual(len(sent), 1)
+
+    def test_cta_watchdog_never_clicks_after_game_process_appears(self):
+        instance = FakeInstance()
+        instance.task_executor.current_task = instance.launcher
+        now = [100.0]
+        observer = types.SimpleNamespace(
+            last_ready_percentage=0.0,
+            same_hash_since=60.0,
+            unavailable_since=None,
+            last_hash="abc",
+        )
+        sent = []
+        watchdog = native.LauncherPrimaryCTAWatchdog(
+            instance,
+            instance.launcher,
+            observer,
+            probe=lambda: {"valid": True, "game_started": True},
+            sender=lambda s: (sent.append(s) or True, {"reason": "posted"}),
+            clock=lambda: now[0],
+        )
+        watchdog._tick()
+        now[0] = 130.0
+        watchdog._tick()
+        self.assertEqual(sent, [])
+
     def test_execute_uses_native_instance_without_patching_launcher(self):
         signal = Signal()
         instance = FakeInstance(signal=signal)
