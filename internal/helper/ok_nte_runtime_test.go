@@ -53,7 +53,7 @@ func TestOKNTEBootstrapBehavior(t *testing.T) {
 
 func TestOKNTENativeLifecycleSource(t *testing.T) {
 	for _, needle := range []string{
-		"native-lifecycle-v2-wgc",
+		"native-lifecycle-v3-cta-watchdog",
 		"select_native_tasks",
 		"enable_after_start",
 		"instance.run_onetime_task(task, exit_after=True)",
@@ -69,6 +69,11 @@ func TestOKNTENativeLifecycleSource(t *testing.T) {
 		"CAPTURE_BACKEND_FORCED",
 		"WGC_UNAVAILABLE",
 		"LAUNCHER_CAPTURE_BACKEND_MISMATCH",
+		"LauncherPrimaryCTAWatchdog",
+		"LAUNCHER_CTA_WATCHDOG_ATTEMPT",
+		"LAUNCHER_CTA_WATCHDOG_EXHAUSTED",
+		"WM_LBUTTONDOWN",
+		"WM_LBUTTONUP",
 	} {
 		if !strings.Contains(okNTENativeLifecycleSource, needle) {
 			t.Fatalf("native lifecycle source missing %q", needle)
