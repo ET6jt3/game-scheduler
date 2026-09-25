@@ -27,3 +27,22 @@ Use `-server http://127.0.0.1:<port>` and `-token <token>` if configured. See PO
 ## Daily chains and automatic startup
 
 Open **每日任务链 / 自动启动** from the dashboard. Set a time, select days, add tasks in order, and save. The same page enables startup at Windows sign-in. `Setup-Startup.cmd` and `Remove-Startup.cmd` are standalone shortcuts. See [AUTOMATION.md](AUTOMATION.md) for catch-up, recovery and preserving your existing settings during an update.
+
+
+### Manual startup and OK-NTE administrator rights
+
+`Start.cmd` now automatically checks whether Game Scheduler is running with an
+administrator token. If it is not elevated, it routes through
+`Run-Elevated.cmd`, stops any existing non-elevated instance safely, and asks
+Windows for one UAC elevation before starting the scheduler.
+
+This prevents the scheduler from appearing healthy while every OK-NTE task
+immediately fails with `ADMIN_REQUIRED` / exit code 30.
+
+For unattended logon, use `Setup-Startup.cmd` from the **current portable
+folder**. It registers the current signed-in Windows account with
+`InteractiveToken` and `RunLevel Highest`, so future logon starts are
+elevated without an interactive UAC prompt at task time.
+
+After moving/updating the portable folder, rerun `Setup-Startup.cmd` so the
+registered task points to the new directory.
