@@ -159,9 +159,10 @@ owns the full lifecycle:
 7. Game Scheduler only observes task completion, supervises timeout/cancellation,
    and records the final result.
 
-The older adapted launcher/input implementation remains embedded only as
-diagnostic/recovery code. It is no longer selectable from the ordinary task
-schema and must not be used by scheduled production chains.
+The older broad adapted launcher/input implementation remains embedded only as
+legacy diagnostic/recovery code and is not selectable from the ordinary task
+schema. The production exception is the bounded primary-CTA watchdog described
+below; it does not replace native OK-NTE lifecycle ownership.
 
 Existing saved tasks that contain historical `input_mode` values continue to
 resolve to the native lifecycle so users do not have to recreate their chains.
@@ -210,3 +211,53 @@ For the remote-connection symptom, leave OK-NTE stalled for at least 20–30
 seconds before connecting remotely. After it begins working, preserve the
 newest stale-before and `stale-frame-recovered` PNG/JSON pairs together with
 the run's `nte-native-*.jsonl`.
+
+
+## Primary CTA watchdog
+
+Production native lifecycle now includes a narrowly-scoped launcher fallback
+for the intermittent condition observed on real Windows hosts where the NTE
+launcher is present but OK-NTE's visual launcher frame is stale or unavailable.
+
+The watchdog does **not** replace `LauncherTask`, does not move the physical
+mouse, and does not click arbitrary windows. It only becomes eligible when all
+of these are true:
+
+1. the current upstream task is the native `LauncherTask`;
+2. `HTGame.exe` is not running;
+3. upstream process/window discovery resolves the official launcher executable;
+4. the launcher HWND is a visible, enabled, non-minimized
+   `Qt51517QWindowOwnDC` window with a non-empty title and sane client size;
+5. native launcher recognition has already had a 20-second grace period;
+6. the launcher task frame has been unchanged for at least 15 seconds, capture
+   has been unavailable for at least 15 seconds, or no launcher frame has ever
+   arrived after the grace period;
+7. OK-NTE is **not** already reporting the launcher-ready color probe above
+   0.8, because in that case native OK-NTE gets first chance to click.
+
+When eligible, the watchdog posts one left click to the center of the same
+normalized primary-CTA region that upstream uses for launcher readiness:
+approximately `(0.8262, 0.8850)` of the launcher client area. The target is
+resolved inside the verified launcher process and the click is sent with
+`WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, and `WM_LBUTTONUP`; the global cursor is
+not moved.
+
+Attempts are rate-limited to one every 12 seconds and capped at six per native
+launcher task. The watchdog stops attempting as soon as `HTGame.exe` appears,
+the launcher task ends, the launcher becomes non-actionable, or native capture
+starts changing normally again.
+
+Events:
+
+- `LAUNCHER_CTA_WATCHDOG_READY`
+- `LAUNCHER_CTA_WATCHDOG_ACTIVE`
+- `LAUNCHER_CTA_WATCHDOG_ATTEMPT`
+- `LAUNCHER_CTA_WATCHDOG_SKIP`
+- `LAUNCHER_CTA_WATCHDOG_GAME_STARTED`
+- `LAUNCHER_CTA_WATCHDOG_EXHAUSTED`
+
+Capture configuration is no longer WGC-only. WGC remains the scheduler's
+preferred capture selection, matching upstream OK-NTE's normal preference, but
+OK-Script's native fallback list is preserved so game capture may use
+`BitBlt_RenderFull` if WGC cannot initialize. Launcher watchdog operation is
+independent of either capture backend.
