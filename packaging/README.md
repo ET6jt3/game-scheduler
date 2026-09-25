@@ -4,9 +4,9 @@ Unzip the entire folder, then double-click **Start.cmd**. **Stop.cmd** requests 
 
 Open **Helpers** to register external or managed installations, set discovery roots, preflight commands, and create tasks. Use the main dashboard to add cron plans. Helper executable paths may point anywhere. Disabling an instance blocks its tasks. Removing its registration does not delete any helper files; tasks still referring to it fail preflight explicitly.
 
-For ok-nte, select `task`, enter the task index shown by your installed helper, and choose exit-after-task. Raw argv is also available. No task-number meanings are assumed. Preflight never launches a game.
+For ok-nte, the `task` helper now defaults to **native** lifecycle mode (`lifecycle_mode=native`). Game Scheduler starts the installed helper's bundled Python runtime, while OK-NTE itself owns LauncherTask, update/start handling, game capture, and DailyRoutineTask. The scheduler only supervises and verifies the daily result. The older cursor-compatible/strict/auto adapters remain explicit fallback modes under `lifecycle_mode=adapted`. Existing tasks from older builds automatically migrate to native unless explicitly switched to adapted. Preflight never launches a game. The upstream PC LauncherTask requires administrator rights. For a manual ok-nte trial, use **Run-Elevated.cmd**; it safely stops a non-elevated scheduler first and restarts the portable package through Windows UAC.
 
-Edit `Config/config.json` after its first creation to change the port or API token. Default: `127.0.0.1:8080`, concurrency 1. If a helper requires administrator access, explicitly run Start.cmd as Administrator. Helpers are installed separately.
+Edit `Config/config.json` after its first creation to change the port or API token. Default: `127.0.0.1:8080`, concurrency 1. If a helper requires administrator access, use **Run-Elevated.cmd** for a manual session. For unattended logon, **Setup-Startup.cmd** registers the scheduler for the current signed-in user with the highest available run level; this is a one-time setup that may show UAC. Helpers are installed separately.
 
 `${ROOT}` means the **App** folder containing server.exe. The supplied config sets `${DATA}`, `${HELPERS}`, and `${RUNTIME}` to sibling folders. Stop before moving the whole package. Variable paths relocate; absolute external paths do not change. Do not copy a running SQLite database; stop first and copy Data into Backups.
 
@@ -27,3 +27,22 @@ Use `-server http://127.0.0.1:<port>` and `-token <token>` if configured. See PO
 ## Daily chains and automatic startup
 
 Open **每日任务链 / 自动启动** from the dashboard. Set a time, select days, add tasks in order, and save. The same page enables startup at Windows sign-in. `Setup-Startup.cmd` and `Remove-Startup.cmd` are standalone shortcuts. See [AUTOMATION.md](AUTOMATION.md) for catch-up, recovery and preserving your existing settings during an update.
+
+
+### Manual startup and OK-NTE administrator rights
+
+`Start.cmd` now automatically checks whether Game Scheduler is running with an
+administrator token. If it is not elevated, it routes through
+`Run-Elevated.cmd`, stops any existing non-elevated instance safely, and asks
+Windows for one UAC elevation before starting the scheduler.
+
+This prevents the scheduler from appearing healthy while every OK-NTE task
+immediately fails with `ADMIN_REQUIRED` / exit code 30.
+
+For unattended logon, use `Setup-Startup.cmd` from the **current portable
+folder**. It registers the current signed-in Windows account with
+`InteractiveToken` and `RunLevel Highest`, so future logon starts are
+elevated without an interactive UAC prompt at task time.
+
+After moving/updating the portable folder, rerun `Setup-Startup.cmd` so the
+registered task points to the new directory.

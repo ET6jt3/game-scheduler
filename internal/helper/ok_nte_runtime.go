@@ -11,9 +11,9 @@ import (
 	"strings"
 )
 
-// The extension is compressed only for Windows command-line transport. Both
-// sources are embedded in the server, readable in the repository, and executed
-// in memory. The external helper/game files are never patched.
+// Both readable Python sources are embedded in server.exe and compressed only
+// for Windows command-line transport. The external helper/game files are never
+// patched or rewritten.
 //
 //go:embed ok_nte_bootstrap.py
 var okNTECoreSource string
@@ -21,20 +21,30 @@ var okNTECoreSource string
 //go:embed _gs_nte_launcher.py
 var okNTELauncherSource string
 
-var okNTEHeadlessBootstrap = buildNTEBootstrap()
+//go:embed ok_nte_native_lifecycle.py
+var okNTENativeLifecycleSource string
 
-func buildNTEBootstrap() string {
+var okNTEHeadlessBootstrap = buildNTEBootstrap()
+var okNTENativeLifecycleBootstrap = buildNTENativeBootstrap()
+
+func compressNTETransport(source string) string {
 	var data bytes.Buffer
 	writer, err := zlib.NewWriterLevel(&data, zlib.BestCompression)
 	if err != nil {
 		panic(err)
 	}
-	if _, err = writer.Write([]byte(okNTELauncherSource)); err != nil {
+	if _, err = writer.Write([]byte(source)); err != nil {
 		panic(err)
 	}
 	if err = writer.Close(); err != nil {
 		panic(err)
 	}
+	return base64.StdEncoding.EncodeToString(data.Bytes())
+}
+
+func buildNTEBootstrap() string {
+	launcher := compressNTETransport(okNTELauncherSource)
+	core := compressNTETransport(okNTECoreSource)
 	exe, err := os.Executable()
 	if err != nil {
 		panic(err)
@@ -44,10 +54,28 @@ func buildNTEBootstrap() string {
 		root = filepath.Dir(root)
 	}
 	logDir, _ := json.Marshal(filepath.Join(root, "Logs", "ok-nte"))
-	prefix := "from __future__ import annotations\nimport sys,types,zlib,base64,os\n" +
+	return "import sys,types,zlib,base64,os\n" +
 		"_gs=types.ModuleType('_gs_nte_launcher');sys.modules[_gs.__name__]=_gs\n" +
-		"exec(compile(zlib.decompress(base64.b64decode('" + base64.StdEncoding.EncodeToString(data.Bytes()) +
+		"exec(compile(zlib.decompress(base64.b64decode('" + launcher +
 		"')), '<gs-nte-launcher>', 'exec'),_gs.__dict__)\n" +
-		"os.environ.setdefault('GS_OK_NTE_EVENT_DIR', " + string(logDir) + ")\n"
-	return prefix + strings.Replace(okNTECoreSource, "from __future__ import annotations\n", "", 1)
+		"os.environ.setdefault('GS_OK_NTE_EVENT_DIR', " + string(logDir) + ")\n" +
+		"exec(compile(zlib.decompress(base64.b64decode('" + core +
+		"')), '<gs-nte-core>', 'exec'),globals())\n"
+}
+
+func buildNTENativeBootstrap() string {
+	source := compressNTETransport(okNTENativeLifecycleSource)
+	exe, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	root := filepath.Dir(exe)
+	if strings.EqualFold(filepath.Base(root), "App") {
+		root = filepath.Dir(root)
+	}
+	logDir, _ := json.Marshal(filepath.Join(root, "Logs", "ok-nte"))
+	return "import zlib,base64,os\n" +
+		"os.environ.setdefault('GS_OK_NTE_EVENT_DIR', " + string(logDir) + ")\n" +
+		"exec(compile(zlib.decompress(base64.b64decode('" + source +
+		"')), '<gs-nte-native>', 'exec'),globals())\n"
 }

@@ -54,11 +54,23 @@ func TestNTEWorkerCommand(t *testing.T) {
 	workerDir := filepath.Join(root, "data", "apps", "ok-nte", "working")
 	workerExe := filepath.Join(root, "data", "apps", "ok-nte", "python", "python.exe")
 	entry := filepath.Join(workerDir, "main.py")
-	if spec.Path != workerExe || spec.Dir != workerDir || len(spec.Args) != 2 || spec.Args[0] != "-c" || spec.Args[1] != okNTEHeadlessBootstrap || spec.Timeout.Seconds() != 37 || !spec.PreserveTimeoutInChain || spec.CompletionMarker != "" {
-		t.Fatalf("worker spec=%+v", spec)
+	if spec.Path != workerExe || spec.Dir != workerDir || len(spec.Args) != 2 || spec.Args[0] != "-c" || spec.Args[1] != okNTENativeLifecycleBootstrap || spec.Timeout.Seconds() != 37 || !spec.PreserveTimeoutInChain || spec.CompletionMarker != "" {
+		t.Fatalf("native worker spec=%+v", spec)
 	}
-	if !reflect.DeepEqual(spec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1"}) {
-		t.Fatalf("worker env=%v", spec.Env)
+	if !reflect.DeepEqual(spec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_LIFECYCLE=native"}) {
+		t.Fatalf("native worker env=%v", spec.Env)
+	}
+	for _, stale := range []string{
+		`{"input_mode":"strict-no-mouse"}`,
+		`{"lifecycle_mode":"adapted","input_mode":"strict-no-mouse"}`,
+		`{"lifecycle_mode":"invalid","input_mode":"invalid"}`,
+	} {
+		staleTask := store.Task{Type: "task", Params: stale}
+		staleSpec, err := d.BuildCommand(g, staleTask)
+		if err != nil || staleSpec.Args[1] != okNTENativeLifecycleBootstrap ||
+			!reflect.DeepEqual(staleSpec.Env, []string{"PYTHONIOENCODING=utf-8", "PYTHONUTF8=1", "GS_OK_NTE_LIFECYCLE=native"}) {
+			t.Fatalf("stale stored params did not force native lifecycle: params=%s spec=%+v err=%v", stale, staleSpec, err)
+		}
 	}
 	entryPath, ok := d.WorkerEntryPath(g, task, spec)
 	if !ok || entryPath != entry {

@@ -1,188 +1,263 @@
-# ok-nte unattended desktop adapter v2: native launcher
+# ok-nte autonomous native lifecycle
 
-This document supersedes the NTE bootstrap description in AUTOMATION.md.
+Game Scheduler now defaults to an OK-NTE-owned lifecycle instead of adapting
+OK-NTE's launcher/input implementation.
 
-## Native launcher correction
+## Default production path: native
 
-Execution #102 showed the v1 adapter was being used, with empty dashboard output
-while the run was still active. That snapshot does not contain runtime events
-and cannot identify the precise point at which that attempt stopped. Inspection
-confirmed two gaps: the input wrapper covered NTEInteraction inside the game,
-but LauncherTask uses a different PostMessage backend; and the inactivity timer
-covered daily tasks, not launcher waits.
+The `task` helper type defaults to:
 
-The v2 adapter wraps the loaded native LauncherTask separately. A recognized
-Start Game, Update, or launcher-popup-close rectangle is clicked with checked
-foreground SendInput. The native launcher HWND, capture HWND, cursor target,
-and window under the pointer are verified. Arbitrary numeric coordinates and
-unknown controls are rejected. Each control has at most three click attempts,
-spaced by at least ten seconds. Sending input does not prove the game started:
-GAME_READY requires the actual game process/window and matching capture.
+`lifecycle_mode = native`
 
-The existing upstream template recognizer still locates the controls. This patch
-does not guess a location when recognition fails, implement new templates, bypass
-login/UAC, or claim that fixture tests prove a particular launcher skin works.
+The scheduler starts OK-NTE's bundled Python runtime from the installed helper,
+loads the installed `src.config`, installs OK-NTE's own startup patches, and
+selects the installed `DailyRoutineTask`.
 
-Native-launcher/controller dispatch has a 300-second default deadline. A detected
-updating state adds 1,800 seconds once, not every frame. This is visual state,
-not verified download-byte progress. Both limits are configurable below. The
-existing whole-task timeout may expire sooner. Launcher timeout/input failure
-returns nonzero, after which the chain follows its existing stop/continue policy.
+It then uses OK-Script's native start controller:
 
-## Deployment contract
+1. emit OK-Script's normal runtime-start signal so OK-NTE RuntimeServices start;
+2. request `DailyRoutineTask`;
+3. OK-Script automatically queues every task with `enable_after_start=True`;
+4. OK-NTE's installed `LauncherTask` therefore owns launcher discovery,
+   update waiting, Start-button recognition/clicking, game-process waiting,
+   launcher-to-game capture switching and resolution/capture checks;
+5. after launcher/game readiness, OK-NTE runs its configured DailyRoutineTask;
+6. Game Scheduler observes the DailyRoutineTask result and exits the worker.
 
-No person needs to move a mouse, hover over the game, or keep generating input.
-The adapter owns cursor placement during its NTE step. It still requires a
-**dedicated, active, unlocked interactive Windows desktop and display surface**.
-This is not a cursor-free, Session-0, locked-screen, or displayless backend.
-No physical-mouse-present check is made; Windows cursor APIs must work. Operation
-with the user's physical mouse unplugged still requires a real-machine test.
+The scheduler does **not** patch or replace any of these in native mode:
 
-Do not use this mode on a shared working desktop. A session-local mutex prevents
-overlapping managed NTE workers, and the existing daily chain serializes helpers.
-The mutex does not exclude unrelated applications or helpers started outside the
-chain. Close any independent ok-nte GUI before a managed run.
+- `LauncherTask.run()`
+- `LauncherTask.click()`
+- `_launcher_button_state()`
+- `NTEInteraction`
+- CursorSync
+- PostMessage behavior
+- SendInput behavior
+- UI Automation
+- screen-saver handling
+- launcher/game capture switching
 
-## Changes
+The external OK-NTE installation remains untouched.
 
-The embedded scheduler-owned Python adapter wraps the installed NTEInteraction
-in memory. It stops its CursorSync thread and suppresses restoration of an old
-user cursor position. It never invokes global BlockInput. Before NTE input it
-restores the target window when minimized, requests and verifies foreground
-access, and positions the software cursor within the target client area. Clicks
-use actual window/capture coordinates, never fixed desktop coordinates. Relative
-camera movement is not recentered while the cursor is already inside the game.
-SendInput's inserted-event count and PostMessageW's return are checked; upstream
-PostMessage's swallowed-error behavior is not accepted as input success.
+## Why this is the default
 
-This does not modify the external helper/game installation, install a driver,
-inject into the game, or alter anti-cheat behavior. It does not auto-login,
-change lock/screensaver policy, switch secure desktops, wiggle a mouse, or
-reattach remote sessions. A temporary Windows execution-state request prevents
-idle system sleep/display-off and is released on exit. It does not override user
-lock/sleep actions, screen savers, organizational policy, or GPU/display removal.
+The previous v2/v3 adapters duplicated launcher/input ownership that OK-NTE
+already implements. Real-machine runs showed that the additional wrapper could
+interfere with changing launcher HWND/capture geometry and made failures harder
+to distinguish from upstream launcher state.
 
-Desktop/session availability is checked every 500 ms and before wrapped input.
-These checks do not make checking and delivering input atomic. Foreground denial,
-lock/disconnect, invalid windows, unavailable cursor APIs, and rejected input
-produce explicit nonzero failures, rather than asking a person to move a mouse.
+Native mode reduces the scheduler's responsibility to:
 
-## Runtime and truthful completion
+- scheduling and same-day dedupe;
+- ordered game chains;
+- timeout/cancellation and process-tree cleanup;
+- elevated interactive startup;
+- stdout/stderr/event capture;
+- truthful DailyRoutineTask completion checking.
 
-The bootstrap sets the installed main.py identity and --headless BEFORE importing
-ok-nte. The old python -c bootstrap omitted this flag, potentially initializing a
-GUI before creating a separate headless application. No short -h is used.
-UTF-8 streams are configured directly because embedded python._pth may ignore
-environment variables. The loaded task is selected by its exact class/module,
-not a numeric list position. One runtime-ready event initializes RuntimeServices;
-OpenVINO Future waits are bounded before the normal StartController dispatch.
-LauncherTask remains responsible for native launcher/update/game readiness.
+## Truthful completion
 
-Success now requires the chosen DailyRoutineTask do_run to have actually started
-and returned True, task_done for the same task object, valid item-status lists,
-no failed/pending entries, at least one successful/explicitly skipped item, and
-no recorded desktop/input/watchdog failure. A zero process exit, help output,
-empty/missing result, swallowed False return, or external game closure alone is
-not proof of successful automation. This is helper-reported task proof, not an
-independent verification of game rewards.
+Native mode still does not treat process exit alone as success.
 
-The runner retains its existing Windows tracked-process cleanup and complete-tree
-rules. This patch does not relax them. Unrelated surviving descendants may still
-cause a runner failure after the helper reports completion.
+The observer requires:
 
-## Diagnostics
+- the installed DailyRoutineTask was actually entered;
+- its `do_run()` returned;
+- OK-Script emitted `task_done` for that exact task;
+- the task returned `True`;
+- `task_status` contains `success/failed/skipped/pending` lists;
+- no failed or pending daily item remains;
+- at least one item is accounted for as success or skipped.
 
-The worker now writes a unique, flushed UTF-8 event file while it runs:
-`Logs/ok-nte/nte-<timestamp>-<pid>.jsonl` inside the scheduler package, not the
-external game directory. GS_OK_NTE_EVENT_DIR can select another directory. Each
-file is bounded to approximately 8 MiB; files are not automatically deleted.
-Full upstream stdout/stderr still appear in the execution record on completion.
-The dashboard does not yet stream those buffers: an empty active-run display is
-not evidence that the worker has produced no logs.
+Failure remains nonzero so a daily chain does not advance to the next helper on
+an unknown or partial OK-NTE result.
 
-WORKER_STARTED and five-second HEARTBEAT records show the current phase.
-Launcher records include LAUNCHER_BEGIN, LAUNCHER_CONTROL, LAUNCHER_CLICK_ATTEMPT,
-LAUNCHER_CLICK_SENT, LAUNCHER_UPDATE_WAIT, and GAME_READY. LAUNCHER_CLICK_SENT
-explicitly does not claim process startup. BLOCKED records identify rejection,
-missing transitions, or timeout. WORKER_RESULT records the final outcome when
-normal cleanup completes. Diagnostic file failure does not change a task into
-success; stdout and exit status remain authoritative.
+## Administrator and desktop requirements
 
+The installed OK-NTE PC LauncherTask requires administrator rights and a signed-in
+interactive Windows desktop.
 
-Output contains GS_OK_NTE_EVENT structured lines, GS_OK_NTE_RUNTIME_READY=1,
-TASK_DISPATCH, and GS_OK_NTE_STATUS with ok/reason/status. BLOCKED includes a
-specific cause, such as FOREGROUND_DENIED, DESKTOP_UNAVAILABLE, INPUT_REJECTED,
-POSTMESSAGE_FAILED, or NO_INPUT_PROGRESS. A watchdog-forced exit can emit BLOCKED
-or CLEANUP_TIMEOUT instead of the final status object; its exit remains nonzero.
+For a manual test, start Game Scheduler with `Run-Elevated.cmd`.
 
-Exit codes: 20 task-proof/items failure; 21 desktop/session unavailable; 22 worker
-exception/interruption; 23 initialization failure/timeout; 24 unsupported
-interface/policy; 25 daily input inactivity; 26 window/input failure; 27 exit or
-cleanup timeout; 28 diagnostic-only (never daily-task success); 29 native-launcher
-control, transition, input, or deadline failure.
+For unattended production, run `Setup-Startup.cmd` once. It registers the
+scheduler at Windows logon for the current interactive user with the highest run
+level. The desktop must remain logged in and unlocked for game automation.
 
-Worker environment options, inherited from the scheduler:
+A non-elevated native run fails early with:
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| GS_OK_NTE_INPUT_MODE | unattended-desktop | Only supported mode. Other values fail explicitly. |
-| GS_OK_NTE_INIT_TIMEOUT | 180 seconds | Initialization limit; accepted range 5-1800. |
-| GS_OK_NTE_NO_INPUT_TIMEOUT | 600 seconds | Daily input inactivity limit; range 30-21600. |
-| GS_OK_NTE_LAUNCH_TIMEOUT | 300 seconds | Native launcher and pre-daily dispatch budget; range 30-1800. |
-| GS_OK_NTE_UPDATE_TIMEOUT | 1800 seconds | One-time extra allowance for a visual updating state; range 30-21600. |
-| GS_OK_NTE_EVENT_DIR | package Logs/ok-nte | Per-run live structured diagnostic directory. |
-| GS_OK_NTE_DOCTOR | unset | Set to 1 for desktop/power-lease checks without importing game code or issuing input; exit 28. |
+`ADMIN_REQUIRED` / exit code 30
 
-The daily inactivity timer runs during DailyRoutineTask. The separate launcher
-deadline now covers native launcher/update/download waiting. It detects absence of delivered input, not ineffective
-repeated actions or every possible game-progress failure. The existing whole-task
-timeout (six-hour fallback when unset) still bounds this helper inside chains.
-Completion gets 30 seconds for upstream exit-after behavior; explicit shutdown
-gets 10 seconds. Session/input failure gives the worker five seconds to exit
-before its watchdog terminates that worker only; OS handles then release.
+rather than pretending the launcher failed.
 
-## Install and qualify
+## Diagnostic events
 
-Use a Windows Actions artifact containing this document, not the older builds.
-Stop the old scheduler, retain a backup, and preserve Config/Data/Helpers/Runtime
-using the existing migration procedure. The fix is embedded in App/server.exe;
-do not copy Python files into the external ok-nte directory. Preflight still
-checks packaged python.exe, working directory, and main.py; execution uses the
-embedded python -c adapter. No normal daily-task JSON changes are required.
+Native runs write:
 
-Test NTE alone first. Leave the pointer outside the game and do not touch it.
-Verify native launcher startup, daily input, final item results, and clean exit.
-Then qualify mouse unplugged, minimized window recovery, locked/disconnected
-session rejection, missing display, model-init failure, and internal task failure.
-Only then enable unattended production chaining. No real game was exercised by
-the automated fixtures, and no locked-desktop operation is claimed.
+`Logs\ok-nte\nte-native-*.jsonl`
 
-## Tests and research
+Expected high-level sequence:
 
-The added launcher fixture suite covers recognized-control routing, checked
-foreground mouse-down/up, blocked/obstructed input, stale captures, missing game
-transitions, retry limits, one-time update extension, launch deadlines, persistent
-failures even when upstream catches an exception, and live event-file flushing.
-Go tests execute that suite and a diagnostic-only invocation of the actual
-assembled Python command. The command is checked against the Windows limit;
-the small launcher module is compressed for transport, while both source files
-remain readable and embedded in server.exe. No external Python installation or
-source file is required in production.
+- `WORKER_STARTED` with `lifecycle=native`
+- `RUNTIME_READY` with `native_launcher=true`
+- `NATIVE_LIFECYCLE_BEGIN`
+- `TASK_DISPATCH`
+- normal upstream OK-NTE / OK-Script launcher and task logs
+- `NATIVE_LIFECYCLE_COMPLETED`
+- `WORKER_RESULT`
+
+The detailed launcher/update/game messages between those events come directly
+from the installed OK-NTE implementation.
+
+## Legacy fallback modes
+
+The older adapter remains available only for explicit troubleshooting by setting
+`lifecycle_mode = adapted` and then choosing one of:
+
+- `cursor-compatible`
+- `strict-no-mouse`
+- `auto`
+
+Existing tasks saved by older builds may contain only `input_mode`; because they
+do not contain `lifecycle_mode=adapted`, they now migrate automatically to the
+native lifecycle instead of silently retaining the unstable adapter.
+
+## Qualification
+
+1. Install the new portable Game Scheduler artifact and migrate persistent state.
+2. Stop any independently running OK-NTE instance.
+3. Start Game Scheduler with `Run-Elevated.cmd`.
+4. Edit the OK-NTE helper task and confirm `lifecycle_mode` is `native`.
+5. Run OK-NTE alone.
+6. Confirm the log says `native-lifecycle-v1` and `native_launcher=true`.
+7. Confirm OK-NTE itself launches/updates the native launcher, enters the game,
+   switches capture to HTGame.exe, and runs DailyRoutineTask.
+8. Confirm `NATIVE_LIFECYCLE_COMPLETED` and exit code 0.
+9. Repeat through `Setup-Startup.cmd` unattended logon startup.
+10. Only then place OK-NTE back between March7thAssistant and BetterGI.
+
+Hosted CI can validate command routing, lifecycle observation, packaging and
+process supervision, but only the user's Windows machine can qualify the actual
+installed NTE launcher/game state.
 
 
-The Go helper test runs Python behavioral fixtures if a Python 3.10+ test
-interpreter exists. Production uses the helper's own packaged Python. Fixtures
-cover cursor positioning, no global input blocking/restoration, rejection after
-desktop loss, input errors, bounded Futures, stable class selection, completion
-proof and cleanup. A Windows-only read-only ABI probe loads Win32 functions but
-does not move input or launch a game.
+## Production autonomous launcher entry
 
-Inspected packaged source: BnanZ0/ok-nte-update at
-ff9f4a043aa768e617cc353e859d7075af81b501; NTEInteraction, RuntimeServices, Globals,
-OK, PostMessageInteraction, and DailyRoutineTask. Current CursorSync was also read.
+The normal `task` type is now native-only.
 
-Primary references:
-https://ok-script.com/ok-nte/en/docs/getting-started/configuration/
-https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setcursorpos
-https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput
-https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setthreadexecutionstate
+Game Scheduler selects the installed `DailyRoutineTask`, verifies that exactly
+one upstream `LauncherTask` exists with `enable_after_start=True`, initializes
+the normal headless OK-Script runtime services, and calls the upstream
+`run_onetime_task(..., exit_after=True)` entry. From that point forward OK-NTE
+owns the full lifecycle:
+
+1. native LauncherTask checks/starts the official NTE launcher;
+2. native launcher capture detects popup/update/start state;
+3. native OK-NTE waits for updates without scheduler click injection;
+4. native OK-NTE launches HTGame.exe;
+5. native OK-NTE switches capture from launcher to game and verifies readiness;
+6. native DailyRoutineTask runs its configured daily subtasks;
+7. Game Scheduler only observes task completion, supervises timeout/cancellation,
+   and records the final result.
+
+The older broad adapted launcher/input implementation remains embedded only as
+legacy diagnostic/recovery code and is not selectable from the ordinary task
+schema. The production exception is the bounded primary-CTA watchdog described
+below; it does not replace native OK-NTE lifecycle ownership.
+
+Existing saved tasks that contain historical `input_mode` values continue to
+resolve to the native lifecycle so users do not have to recreate their chains.
+
+
+## Native launcher capture diagnostics
+
+The native production lifecycle includes a **read-only launcher observer**. It
+does not call `capture.get_frame()`, does not replace `LauncherTask`, does not
+click, resize, recenter or rebind capture, and does not consume a second WGC or
+BitBlt stream. It only inspects the `LauncherTask.frame` that OK-NTE already
+acquired for its own recognition.
+
+While the upstream `LauncherTask` is the current task, diagnostics are written
+under:
+
+`Logs/ok-nte/launcher-capture/`
+
+Each saved pair contains:
+
+- `launcher-<timestamp>.png` — the exact task frame OK-NTE was analyzing;
+- matching `.json` metadata with HWND, PID, class/title (when available),
+  window rect, OK-Script position/size/crop values, capture backend,
+  `capture_target_signature`, frame SHA-256, frame min/max/mean, and the exact
+  launcher-ready probe rectangle;
+- `launcher_button_ready_percentage` calculated from the same BGR range
+  (215–225 on each channel) used by upstream `LauncherTask`.
+
+Relevant JSONL events:
+
+- `LAUNCHER_CAPTURE_DIAGNOSTICS_READY`
+- `LAUNCHER_CAPTURE_OBSERVER_ACTIVE`
+- `LAUNCHER_CAPTURE_TARGET` — HWND/geometry/capture signature changed;
+- `LAUNCHER_CAPTURE_POSITION_INVALID`
+- `LAUNCHER_CAPTURE_STALE` — the same task-frame SHA-256 persisted for at
+  least 15 seconds;
+- `LAUNCHER_CAPTURE_RECOVERED` — a previously stale task frame changed;
+- `LAUNCHER_CAPTURE_SNAPSHOT` — records the PNG and metadata paths.
+
+Snapshots are bounded to 48 files per run. Normal animation frames are not
+continuously dumped. The observer saves the first launcher frame, target/signature
+changes, invalid-position evidence, periodic stale-frame evidence, and the first
+frame after a stale period recovers.
+
+For the remote-connection symptom, leave OK-NTE stalled for at least 20–30
+seconds before connecting remotely. After it begins working, preserve the
+newest stale-before and `stale-frame-recovered` PNG/JSON pairs together with
+the run's `nte-native-*.jsonl`.
+
+
+## Primary CTA watchdog
+
+Production native lifecycle now includes a narrowly-scoped launcher fallback
+for the intermittent condition observed on real Windows hosts where the NTE
+launcher is present but OK-NTE's visual launcher frame is stale or unavailable.
+
+The watchdog does **not** replace `LauncherTask`, does not move the physical
+mouse, and does not click arbitrary windows. It only becomes eligible when all
+of these are true:
+
+1. the current upstream task is the native `LauncherTask`;
+2. `HTGame.exe` is not running;
+3. upstream process/window discovery resolves the official launcher executable;
+4. the launcher HWND is a visible, enabled, non-minimized
+   `Qt51517QWindowOwnDC` window with a non-empty title and sane client size;
+5. native launcher recognition has already had a 20-second grace period;
+6. the launcher task frame has been unchanged for at least 15 seconds, capture
+   has been unavailable for at least 15 seconds, or no launcher frame has ever
+   arrived after the grace period;
+7. OK-NTE is **not** already reporting the launcher-ready color probe above
+   0.8, because in that case native OK-NTE gets first chance to click.
+
+When eligible, the watchdog posts one left click to the center of the same
+normalized primary-CTA region that upstream uses for launcher readiness:
+approximately `(0.8262, 0.8850)` of the launcher client area. The target is
+resolved inside the verified launcher process and the click is sent with
+`WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, and `WM_LBUTTONUP`; the global cursor is
+not moved.
+
+Attempts are rate-limited to one every 12 seconds and capped at six per native
+launcher task. The watchdog stops attempting as soon as `HTGame.exe` appears,
+the launcher task ends, the launcher becomes non-actionable, or native capture
+starts changing normally again.
+
+Events:
+
+- `LAUNCHER_CTA_WATCHDOG_READY`
+- `LAUNCHER_CTA_WATCHDOG_ACTIVE`
+- `LAUNCHER_CTA_WATCHDOG_ATTEMPT`
+- `LAUNCHER_CTA_WATCHDOG_SKIP`
+- `LAUNCHER_CTA_WATCHDOG_GAME_STARTED`
+- `LAUNCHER_CTA_WATCHDOG_EXHAUSTED`
+
+Capture configuration is no longer WGC-only. WGC remains the scheduler's
+preferred capture selection, matching upstream OK-NTE's normal preference, but
+OK-Script's native fallback list is preserved so game capture may use
+`BitBlt_RenderFull` if WGC cannot initialize. Launcher watchdog operation is
+independent of either capture backend.

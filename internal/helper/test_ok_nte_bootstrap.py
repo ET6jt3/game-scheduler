@@ -56,6 +56,10 @@ def inputs():
     class Base:
         def post(self, *args, **kwargs):
             raise AssertionError("Original upstream PostMessage can swallow failures")
+        def move(self, x, y, down_btn=0):
+            lparam = (int(x) & 0xffff) | ((int(y) & 0xffff) << 16)
+            self.post(0x200, down_btn, lparam)
+            return lparam
     class NTE(Base):
         def __init__(self):
             self.calls = []
@@ -128,41 +132,66 @@ class Tests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(b.Failure): b.validate(self.state(**change))
     def test_reject_missing_display(self):
         with self.assertRaises(b.Failure): b.validate(self.state(monitors=0))
-    def test_reject_unusable_cursor_api(self):
-        with self.assertRaises(b.Failure): b.validate(self.state(cursor=False))
+    def test_cursor_api_is_not_required_for_strict_capable_session(self):
+        b.validate(self.state(cursor=False))
     def test_command_line_under_windows_limit(self):
         code = Path(b.__file__).read_text(encoding="utf-8")
         command = subprocess.list2cmdline(["C:/" + "long-path/" * 50 + "python.exe", "-c", code])
         self.assertLess(len(command.encode("utf-16-le")) // 2, 30000)
     def test_cursor_outside_screen_is_positioned_without_human(self):
-        cls, base = inputs(); d = FakeDesktop(); restore = b.patch_input(cls, base, b.Guard(d))
+        cls, base = inputs(); d = FakeDesktop(); restore = b.patch_input(cls, base, b.Guard(d), b.Failure)
         try:
             obj = cls(); obj.click(400, 300, move_back=True)
             self.assertEqual(d.cursor, (500, 400))
             self.assertEqual(obj.calls, ["sync_stop", ("click", 400, 300, False, False, "left")])
             self.assertEqual(len(d.messages), 2)
         finally: restore()
+    def test_strict_click_uses_virtual_hover_without_global_cursor(self):
+        cls, base = inputs(); d = FakeDesktop(); guard = b.Guard(d, mode="strict-no-mouse")
+        restore = b.patch_input(cls, base, guard, b.Failure)
+        try:
+            obj = cls(); obj.click(400, 300, move_back=True)
+            self.assertEqual(d.cursor, (-400, -400))
+            self.assertEqual(obj.calls, ["sync_stop", ("click", 400, 300, False, False, "left")])
+            self.assertEqual([m[1] for m in d.messages], [0x200, 0x201, 0x202])
+            audit = guard.verify_input_contract()
+            self.assertEqual(audit["cursor_positions"], 0)
+            self.assertEqual(audit["send_input"], 0)
+            self.assertEqual(audit["virtual_moves"], 1)
+        finally: restore()
+
     def test_positional_click_arguments_normalized(self):
-        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()))
+        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()), b.Failure)
         try:
             obj = cls(); obj.click(4, 5, True, None, 0.01, True, "right")
             self.assertIn(("click", 4, 5, False, False, "right"), obj.calls)
         finally: restore()
     def test_operate_preserves_result_but_not_global_block_or_restore(self):
-        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()))
+        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()), b.Failure)
         try:
             obj = cls(); self.assertEqual(obj.operate(lambda: 17, True, True), 17)
             obj.block_input(); obj.unblock_input(); obj._restore_cursor()
             self.assertEqual(obj.calls, ["sync_stop", ("operate", False, False)])
         finally: restore()
     def test_sendinput_zero_is_error(self):
-        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()))
+        cls, base = inputs(); restore = b.patch_input(cls, base, b.Guard(FakeDesktop()), b.Failure)
         try:
             obj = cls(); self.assertEqual(obj.move_mouse_relative(5, 1), 1); obj.send_result = 0
             with self.assertRaisesRegex(b.Failure, "SendInput"): obj.move_mouse_relative(5, 1)
         finally: restore()
+    def test_strict_relative_mouse_fails_closed_before_sendinput(self):
+        cls, base = inputs(); guard = b.Guard(FakeDesktop(), mode="strict-no-mouse")
+        restore = b.patch_input(cls, base, guard, b.Failure)
+        try:
+            obj = cls()
+            with self.assertRaises(b.Failure) as caught:
+                obj.move_mouse_relative(5, 1)
+            self.assertEqual(caught.exception.reason, "STRICT_RELATIVE_MOUSE_UNSUPPORTED")
+            self.assertEqual(guard.audit_snapshot()["send_input"], 0)
+        finally: restore()
+
     def test_lock_mid_run_blocks_next_input(self):
-        cls, base = inputs(); d = FakeDesktop(); restore = b.patch_input(cls, base, b.Guard(d))
+        cls, base = inputs(); d = FakeDesktop(); restore = b.patch_input(cls, base, b.Guard(d), b.Failure)
         try:
             obj = cls(); obj.send_key("f1"); self.assertEqual(len(d.messages), 2)
             d.problem = b.Failure("DESKTOP_UNAVAILABLE", "locked")
@@ -172,7 +201,7 @@ class Tests(unittest.TestCase):
     def test_foreground_denial_blocks_click(self):
         cls, base = inputs(); d = FakeDesktop()
         def deny(hwnd): raise b.Failure("FOREGROUND_DENIED", "denied")
-        d.foreground = deny; restore = b.patch_input(cls, base, b.Guard(d))
+        d.foreground = deny; restore = b.patch_input(cls, base, b.Guard(d), b.Failure)
         try:
             obj = cls()
             with self.assertRaises(b.Failure): obj.click(1, 2)
@@ -181,23 +210,23 @@ class Tests(unittest.TestCase):
     def test_postmessage_failure_cannot_be_swallowed(self):
         cls, base = inputs(); d = FakeDesktop()
         def reject(*args): raise b.Failure("POSTMESSAGE_FAILED", "rejected")
-        d.post = reject; guard = b.Guard(d); restore = b.patch_input(cls, base, guard)
+        d.post = reject; guard = b.Guard(d); restore = b.patch_input(cls, base, guard, b.Failure)
         try:
             with self.assertRaisesRegex(b.Failure, "rejected"): cls().send_key("f1")
             self.assertEqual(guard.failure.reason, "POSTMESSAGE_FAILED")
         finally: restore()
     def test_activation_is_not_progress(self):
-        cls, base = inputs(); guard = b.Guard(FakeDesktop()); restore = b.patch_input(cls, base, guard)
+        cls, base = inputs(); guard = b.Guard(FakeDesktop()); restore = b.patch_input(cls, base, guard, b.Failure)
         try:
             obj = cls(); guard.last_input = 0; obj.post(6, 1, 0)
             self.assertEqual(guard.last_input, 0)
             obj.post(0x100, 70, 0); self.assertGreater(guard.last_input, 0)
         finally: restore()
     def test_unsupported_input_interface_fails(self):
-        with self.assertRaises(b.Failure): b.patch_input(type("Bad", (), {}), object, b.Guard(FakeDesktop()))
+        with self.assertRaises(b.Failure): b.patch_input(type("Bad", (), {}), object, b.Guard(FakeDesktop()), b.Failure)
     def test_signature_drift_fails(self):
         cls, base = inputs(); cls.click = lambda self, anything: None
-        with self.assertRaises(b.Failure): b.patch_input(cls, base, b.Guard(FakeDesktop()))
+        with self.assertRaises(b.Failure): b.patch_input(cls, base, b.Guard(FakeDesktop()), b.Failure)
     def test_future_ready(self):
         f = Future(); value = object(); f.set_result(value)
         self.assertIs(b.wait_detector(types.SimpleNamespace(_started=True, _openvino_model_future=f), b.Guard(FakeDesktop())), value)
@@ -239,13 +268,43 @@ class Tests(unittest.TestCase):
     def test_other_task_done_does_not_count(self):
         task = daily(); p = b.Proof(task, b.Guard(FakeDesktop())); task.do_run(); p.on_done(daily())
         with self.assertRaises(b.Failure): p.verify()
-    def test_cursor_free_mode_rejected_before_desktop(self):
+    def test_invalid_input_mode_rejected_before_desktop(self):
         with patch.dict(os.environ, {"GS_OK_NTE_INPUT_MODE": "background-only"}):
             code, out = b.execute(lambda: self.fail("should not open desktop"))
         self.assertEqual(code, 24); self.assertFalse(out["ok"])
+
+    def test_legacy_mode_alias_maps_to_compatibility(self):
+        d, task = FakeDesktop(), daily(); events = types.SimpleNamespace(task_done=Signal())
+        class Instance:
+            def run_onetime_task(self, t, exit_after):
+                t.do_run(); events.task_done.emit(t)
+            def quit(self): pass
+        def loader(g):
+            g.init_deadline = None; g.instance = Instance()
+            return g.instance, task, events, lambda: None
+        with patch.dict(os.environ, {"GS_OK_NTE_INPUT_MODE": "unattended-desktop"}),              patch.object(b.Guard, "start", lambda g: None):
+            code, out = b.execute(lambda: d, loader)
+        self.assertEqual(code, 0)
+        self.assertEqual(out["input_mode"], "cursor-compatible")
+
+    def test_strict_contract_rejects_forbidden_global_input_audit(self):
+        g = b.Guard(FakeDesktop(), mode="strict-no-mouse")
+        g.count("send_input")
+        with self.assertRaises(b.Failure) as caught:
+            g.verify_input_contract()
+        self.assertEqual(caught.exception.reason, "STRICT_INPUT_CONTRACT_BREACH")
     def test_bad_deadline_policy(self):
         for value in ("nan", "-1", "0", "inf", "bad"):
             with patch.dict(os.environ, {"GS_OK_NTE_INIT_TIMEOUT": value}), self.assertRaises(b.Failure): b.Guard(FakeDesktop())
+    def test_real_runtime_requires_admin_before_import(self):
+        d = FakeDesktop()
+        with patch.object(b, "is_elevated", return_value=False),              patch.object(b.Guard, "start", lambda g: self.fail("watchdog should not start")):
+            code, out = b.execute(lambda: d, b.load_runtime)
+        self.assertEqual(code, 30)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["reason"], "ADMIN_REQUIRED")
+        self.assertTrue(d.closed)
+
     def test_doctor_does_not_import_runtime_or_count_as_task_success(self):
         d = FakeDesktop()
         with patch.dict(os.environ, {"GS_OK_NTE_DOCTOR": "1"}):

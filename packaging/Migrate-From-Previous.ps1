@@ -52,8 +52,27 @@ if(Test-Path -LiteralPath (Join-Path $PreviousRoot 'Config\config.json')){
   Copy-Item -LiteralPath (Join-Path $PreviousRoot 'Config\config.json') -Destination (Join-Path $NewRoot 'Config\config.json') -Force
 }
 if(Test-Path -LiteralPath (Join-Path $PreviousRoot 'Config\helpers')){
-  [void][IO.Directory]::CreateDirectory((Join-Path $NewRoot 'Config\helpers'))
-  Copy-Item -Path (Join-Path $PreviousRoot 'Config\helpers\*') -Destination (Join-Path $NewRoot 'Config\helpers') -Recurse -Force
+  $newHelperDir=Join-Path $NewRoot 'Config\helpers'
+  $oldHelperDir=Join-Path $PreviousRoot 'Config\helpers'
+  [void][IO.Directory]::CreateDirectory($newHelperDir)
+
+  # New-package helper definitions are code/version contracts, not user state.
+  # Preserve them when the same filename exists in the new package. This is
+  # especially important for ok-nte, whose worker/lifecycle schema can change
+  # between scheduler releases. User-added definitions with unique filenames
+  # still migrate normally. Keep a copy of every skipped old definition in the
+  # migration backup so deliberate customizations can be reconciled manually.
+  $skippedOld=Join-Path $backup 'previous-Config__helpers'
+  foreach($source in Get-ChildItem -LiteralPath $oldHelperDir -File){
+    $destination=Join-Path $newHelperDir $source.Name
+    if(Test-Path -LiteralPath $destination){
+      [void][IO.Directory]::CreateDirectory($skippedOld)
+      Copy-Item -LiteralPath $source.FullName -Destination (Join-Path $skippedOld $source.Name) -Force
+      Write-Host ('Keeping new helper definition; previous copy backed up: '+$source.Name)
+    }else{
+      Copy-Item -LiteralPath $source.FullName -Destination $destination -Force
+    }
+  }
 }
 foreach($rel in @('Helpers','Runtime')){
   $src=Join-Path $PreviousRoot $rel

@@ -27,6 +27,18 @@ try{
  if($LASTEXITCODE -ne 0){throw 'First build failed'}
  $first=(Get-Content dist\last-build.txt -Raw).Trim()
  if(!(Test-Path (Join-Path $first 'App\server.exe'))){throw 'First build missing server'}
+ $elevatedLauncher=Join-Path $first 'Run-Elevated.cmd'
+ if(!(Test-Path -LiteralPath $elevatedLauncher)){throw 'First build missing Run-Elevated.cmd'}
+ $elevatedText=Get-Content -LiteralPath $elevatedLauncher -Raw
+ if($elevatedText -notmatch 'Portable\.ps1.*-Action Stop' -or $elevatedText -notmatch '-Verb RunAs'){
+  throw 'Run-Elevated.cmd does not stop safely then request elevation'
+ }
+ $startLauncher=Join-Path $first 'Start.cmd'
+ if(!(Test-Path -LiteralPath $startLauncher)){throw 'First build missing Start.cmd'}
+ $startText=Get-Content -LiteralPath $startLauncher -Raw
+ if($startText -notmatch 'WindowsBuiltInRole.*Administrator' -or $startText -notmatch 'Run-Elevated\.cmd'){
+  throw 'Start.cmd does not auto-route a non-elevated manual start through Run-Elevated.cmd'
+ }
  $before=(Get-FileHash (Join-Path $first 'App\server.exe')).Hash
  Set-Content -LiteralPath (Join-Path $first 'Data\preserve.txt') -Value 'keep existing user data'
  & .\Build.cmd
@@ -40,12 +52,32 @@ try{
  Set-Content -LiteralPath (Join-Path $first 'Config\config.json') -Value '{"addr":"127.0.0.1:18080","data_dir":"${ROOT}/../Data","db_path":"${DATA}/scheduler.db"}' -Encoding UTF8
  Set-Content -LiteralPath (Join-Path $first 'Helpers\managed-marker.txt') -Value 'managed helper state'
  Set-Content -LiteralPath (Join-Path $first 'Runtime\runtime-marker.txt') -Value 'runtime state'
+ # Simulate a stale package-owned helper definition from an older release and
+ # a user-added helper definition that must migrate.
+ $oldHelperDir=Join-Path $first 'Config\helpers'
+ [void][IO.Directory]::CreateDirectory($oldHelperDir)
+ $oldNtePath=Join-Path $oldHelperDir 'ok-nte.json'
+ $oldNteOriginal=Get-Content -LiteralPath $oldNtePath -Raw
+ Set-Content -LiteralPath $oldNtePath -Value '{"schema_version":1,"stale":true}' -Encoding UTF8
+ $oldCustomPath=Join-Path $oldHelperDir 'user-custom.json'
+ Set-Content -LiteralPath $oldCustomPath -Value '{"custom":true}' -Encoding UTF8
  & (Join-Path $second 'App\Migrate-From-Previous.ps1') -PreviousRoot $first
  if(!(Test-Path (Join-Path $second 'Data\preserve.txt'))){throw 'Migration did not copy Data'}
  if((Get-Content (Join-Path $second 'Config\config.json') -Raw) -notmatch '18080'){throw 'Migration did not copy config.json'}
  if(!(Test-Path (Join-Path $second 'Helpers\managed-marker.txt')) -or !(Test-Path (Join-Path $second 'Runtime\runtime-marker.txt'))){throw 'Migration did not copy managed helper/runtime state'}
- if(!(Get-ChildItem (Join-Path $second 'Backups') -Directory | Where-Object Name -like 'pre-migration-*')){throw 'Migration did not create safety backup'}
- Write-Host 'PASS: previous portable state migrates into a newly extracted package'
+ $newNte=Get-Content -LiteralPath (Join-Path $second 'Config\helpers\ok-nte.json') -Raw | ConvertFrom-Json
+ if($newNte.launch.worker.bootstrap -ne 'runtime-services'){throw 'Migration overwrote current ok-nte native worker definition'}
+ if(@($newNte.task_types.task.fields.PSObject.Properties).Count -ne 0){throw 'Production ok-nte task unexpectedly exposes lifecycle/input controls'}
+ if(($newNte.task_types.task.args -join ' ') -ne '-t 2 -e --headless'){throw 'Migration changed current ok-nte DailyRoutineTask entry'}
+ if(!(Test-Path -LiteralPath (Join-Path $second 'Config\helpers\user-custom.json'))){throw 'Migration did not copy user-added helper definition'}
+ $migrationBackup=Get-ChildItem (Join-Path $second 'Backups') -Directory | Where-Object Name -like 'pre-migration-*' | Select-Object -First 1
+ if(!$migrationBackup){throw 'Migration did not create safety backup'}
+ if(!(Test-Path -LiteralPath (Join-Path $migrationBackup.FullName 'previous-Config__helpers\ok-nte.json'))){throw 'Migration did not back up skipped previous ok-nte definition'}
+ Write-Host 'PASS: previous portable state migrates; current built-in definitions win; user helper definitions are preserved'
+ # Restore the first build after the migration fixture. The next workflow step
+ # deliberately smokes dist\GameScheduler-Portable, which is this first build.
+ Set-Content -LiteralPath $oldNtePath -Value $oldNteOriginal -Encoding UTF8
+ Remove-Item -LiteralPath $oldCustomPath -Force -ErrorAction SilentlyContinue
  $goEnv=(& $bootstrap -GoArgs @('env','-json','GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOENV','GOTOOLCHAIN','GOTELEMETRY','GOTELEMETRYDIR')) -join "`n" | ConvertFrom-Json
  foreach($key in @('GOROOT','GOPATH','GOMODCACHE','GOCACHE','GOTMPDIR','GOTELEMETRYDIR')){
   if(!$goEnv.$key.StartsWith((Join-Path $repoRoot 'Toolchain'),[StringComparison]::OrdinalIgnoreCase)){throw "$key escaped repository: $($goEnv.$key)"}
