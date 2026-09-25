@@ -1,9 +1,10 @@
 """Minimal Game Scheduler observer for ok-nte's native lifecycle.
 
-This module deliberately does NOT patch LauncherTask, NTEInteraction, capture,
-cursor handling, or input backends. ok-nte owns launcher -> game -> daily task.
-Game Scheduler only selects DailyRoutineTask, observes truthful completion, and
-provides deterministic process-level diagnostics.
+This module does not replace LauncherTask, NTEInteraction, or OK-Script capture.
+ok-nte owns launcher -> game -> daily task. Game Scheduler selects
+DailyRoutineTask, observes truthful completion, and provides diagnostics plus a
+narrow PostMessage-only launcher-primary-CTA watchdog when native visual
+recognition is demonstrably stalled.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import sys
 import threading
 import time
 
-VERSION = "native-lifecycle-v2-wgc"
+VERSION = "native-lifecycle-v3-cta-watchdog"
 _EVENT_FILE = None
 _EVENT_LOCK = threading.Lock()
 _EVENT_BYTES = 0
@@ -144,6 +145,8 @@ class LauncherCaptureObserver:
         self.last_stale_emit = 0.0
         self.backend_mismatch = None
         self.backend_mismatch_emitted = False
+        self.last_ready_percentage = None
+        self.unavailable_since = None
         self.directory = None
         base = os.environ.get("GS_OK_NTE_EVENT_DIR")
         if base:
@@ -250,8 +253,11 @@ class LauncherCaptureObserver:
         capture = getattr(device_manager, "capture_method", None)
         hwnd_window = getattr(device_manager, "hwnd_window", None)
         if capture is None or hwnd_window is None:
+            if self.unavailable_since is None:
+                self.unavailable_since = time.monotonic()
             emit("LAUNCHER_CAPTURE_UNAVAILABLE")
             return
+        self.unavailable_since = None
 
         metadata = self._window_metadata(hwnd_window)
         metadata["capture_method"] = type(capture).__name__
@@ -275,8 +281,11 @@ class LauncherCaptureObserver:
         # another capture consumer could itself perturb WGC/BitBlt timing.
         frame = getattr(self.launcher, "frame", None)
         if frame is None:
+            if self.unavailable_since is None:
+                self.unavailable_since = time.monotonic()
             emit("LAUNCHER_CAPTURE_EMPTY", **metadata)
             return
+        self.unavailable_since = None
         try:
             frame = frame.copy()
         except Exception:
@@ -304,6 +313,9 @@ class LauncherCaptureObserver:
                     metadata["launcher_button_ready_percentage"] = (
                         float(cv2.countNonZero(mask)) / total if total else 0.0
                     )
+                    self.last_ready_percentage = metadata[
+                        "launcher_button_ready_percentage"
+                    ]
         except Exception as error:
             metadata["frame_metric_error"] = type(error).__name__ + ": " + str(error)
 
@@ -420,6 +432,296 @@ class LauncherCaptureObserver:
             except BaseException as error:
                 emit(
                     "LAUNCHER_CAPTURE_OBSERVER_ERROR",
+                    error=type(error).__name__ + ": " + str(error),
+                )
+
+
+class LauncherPrimaryCTAWatchdog:
+    """Bounded fallback for a visually-stalled native launcher task.
+
+    The watchdog never moves the physical cursor and never clicks arbitrary
+    windows. It requires the exact upstream launcher process/window, an active
+    native LauncherTask, no HTGame process, and evidence that native launcher
+    capture has been stale or unavailable long enough for normal OK-NTE
+    recognition to have had a chance first.
+    """
+
+    CTA_X = (0.8137 + 0.8387) / 2.0
+    CTA_Y = (0.8678 + 0.9022) / 2.0
+    GRACE_SECONDS = 20.0
+    STALE_SECONDS = 15.0
+    ATTEMPT_INTERVAL_SECONDS = 12.0
+    MAX_ATTEMPTS = 6
+
+    def __init__(
+        self,
+        instance,
+        launcher,
+        observer,
+        probe=None,
+        sender=None,
+        clock=time.monotonic,
+    ):
+        self.instance = instance
+        self.launcher = launcher
+        self.observer = observer
+        self.probe = probe or self._default_probe
+        self.sender = sender or self._default_sender
+        self.clock = clock
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.active_since = None
+        self.last_attempt = 0.0
+        self.attempts = 0
+        self.exhausted_emitted = False
+        self.game_started_emitted = False
+
+    def start(self):
+        emit(
+            "LAUNCHER_CTA_WATCHDOG_READY",
+            grace_seconds=self.GRACE_SECONDS,
+            stale_seconds=self.STALE_SECONDS,
+            attempt_interval_seconds=self.ATTEMPT_INTERVAL_SECONDS,
+            max_attempts=self.MAX_ATTEMPTS,
+            cta=[round(self.CTA_X, 6), round(self.CTA_Y, 6)],
+            input_backend="PostMessage",
+        )
+        self.thread = threading.Thread(
+            target=self._run,
+            name="GS-NTE-LauncherCTAWatchdog",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread and self.thread is not threading.current_thread():
+            self.thread.join(timeout=3)
+
+    def _default_probe(self):
+        if os.name != "nt":
+            return {"valid": False, "reason": "not-windows"}
+        from src import GAME_EXE, LAUNCHER_EXE
+        import win32gui
+
+        if self.launcher._find_process(GAME_EXE):
+            return {"valid": True, "game_started": True}
+
+        proc, hwnd = self.launcher._find_process_window(
+            LAUNCHER_EXE,
+            require_title=True,
+        )
+        if not proc or not hwnd:
+            return {"valid": False, "reason": "launcher-window-unavailable"}
+        if not win32gui.IsWindow(hwnd):
+            return {"valid": False, "reason": "launcher-hwnd-invalid"}
+        try:
+            class_name = win32gui.GetClassName(hwnd)
+            title = win32gui.GetWindowText(hwnd)
+            visible = bool(win32gui.IsWindowVisible(hwnd))
+            iconic = bool(win32gui.IsIconic(hwnd))
+            enabled = bool(win32gui.IsWindowEnabled(hwnd))
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            client_left, client_top, client_right, client_bottom = win32gui.GetClientRect(hwnd)
+        except Exception as error:
+            return {
+                "valid": False,
+                "reason": "launcher-window-query-failed",
+                "error": type(error).__name__ + ": " + str(error),
+            }
+
+        width = max(0, client_right - client_left)
+        height = max(0, client_bottom - client_top)
+        expected_class = "Qt51517QWindowOwnDC"
+        valid = (
+            class_name == expected_class
+            and bool(title)
+            and visible
+            and not iconic
+            and enabled
+            and width > 200
+            and height > 200
+        )
+        return {
+            "valid": valid,
+            "reason": "ready" if valid else "launcher-window-not-actionable",
+            "game_started": False,
+            "hwnd": int(hwnd),
+            "pid": int(proc.get("pid") or 0),
+            "exe": proc.get("exe"),
+            "name": proc.get("name"),
+            "class_name": class_name,
+            "title": title,
+            "visible": visible,
+            "iconic": iconic,
+            "enabled": enabled,
+            "window_rect": [left, top, right, bottom],
+            "client_size": [width, height],
+        }
+
+    def _default_sender(self, state):
+        if os.name != "nt":
+            return False, {"reason": "not-windows"}
+        import win32api
+        import win32con
+        import win32gui
+        import win32process
+
+        hwnd = int(state["hwnd"])
+        width, height = state["client_size"]
+        x = max(1, min(width - 2, round(width * self.CTA_X)))
+        y = max(1, min(height - 2, round(height * self.CTA_Y)))
+
+        try:
+            abs_x, abs_y = win32gui.ClientToScreen(hwnd, (x, y))
+            target = win32gui.WindowFromPoint((abs_x, abs_y))
+            if not target or not win32gui.IsWindow(target):
+                target = hwnd
+            _, target_pid = win32process.GetWindowThreadProcessId(target)
+            if int(target_pid) != int(state["pid"]):
+                target = hwnd
+
+            local_x, local_y = win32gui.ScreenToClient(target, (abs_x, abs_y))
+            packed = win32api.MAKELONG(int(local_x), int(local_y))
+
+            # Match OK-Script's PostMessage interaction semantics without
+            # touching the physical/global cursor.
+            win32gui.PostMessage(hwnd, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0)
+            if target != hwnd:
+                win32gui.PostMessage(
+                    target,
+                    win32con.WM_ACTIVATE,
+                    win32con.WA_ACTIVE,
+                    0,
+                )
+            win32gui.PostMessage(target, win32con.WM_MOUSEMOVE, 0, packed)
+            win32gui.PostMessage(
+                target,
+                win32con.WM_LBUTTONDOWN,
+                win32con.MK_LBUTTON,
+                packed,
+            )
+            time.sleep(0.02)
+            win32gui.PostMessage(target, win32con.WM_LBUTTONUP, 0, packed)
+            return True, {
+                "reason": "posted",
+                "target_hwnd": int(target),
+                "client_point": [int(local_x), int(local_y)],
+                "base_client_point": [int(x), int(y)],
+            }
+        except Exception as error:
+            return False, {
+                "reason": "postmessage-failed",
+                "error": type(error).__name__ + ": " + str(error),
+            }
+
+    def _stall_reason(self, now):
+        ready = self.observer.last_ready_percentage
+        if ready is not None and ready > 0.8:
+            return None
+
+        if self.observer.same_hash_since is not None:
+            stale_for = now - self.observer.same_hash_since
+            if stale_for >= self.STALE_SECONDS:
+                return "stale-frame"
+
+        if self.observer.unavailable_since is not None:
+            unavailable_for = now - self.observer.unavailable_since
+            if unavailable_for >= self.STALE_SECONDS:
+                return "capture-unavailable"
+
+        if (
+            self.observer.last_hash is None
+            and self.active_since is not None
+            and now - self.active_since >= self.GRACE_SECONDS
+        ):
+            return "no-launcher-frame"
+        return None
+
+    def _reset_inactive(self):
+        self.active_since = None
+        self.last_attempt = 0.0
+        self.attempts = 0
+        self.exhausted_emitted = False
+        self.game_started_emitted = False
+
+    def _tick(self):
+        now = self.clock()
+        executor = self.instance.task_executor
+        if getattr(executor, "current_task", None) is not self.launcher:
+            self._reset_inactive()
+            return
+
+        if self.active_since is None:
+            self.active_since = now
+            emit("LAUNCHER_CTA_WATCHDOG_ACTIVE")
+            return
+
+        state = self.probe()
+        if state.get("game_started"):
+            if not self.game_started_emitted:
+                emit(
+                    "LAUNCHER_CTA_WATCHDOG_GAME_STARTED",
+                    attempts=self.attempts,
+                )
+                self.game_started_emitted = True
+            return
+
+        if not state.get("valid"):
+            emit(
+                "LAUNCHER_CTA_WATCHDOG_SKIP",
+                reason=state.get("reason"),
+                attempts=self.attempts,
+            )
+            return
+
+        if now - self.active_since < self.GRACE_SECONDS:
+            return
+
+        stall_reason = self._stall_reason(now)
+        if stall_reason is None:
+            return
+
+        if self.attempts >= self.MAX_ATTEMPTS:
+            if not self.exhausted_emitted:
+                emit(
+                    "LAUNCHER_CTA_WATCHDOG_EXHAUSTED",
+                    attempts=self.attempts,
+                    stall_reason=stall_reason,
+                    hwnd=state.get("hwnd"),
+                )
+                self.exhausted_emitted = True
+            return
+
+        if self.last_attempt and now - self.last_attempt < self.ATTEMPT_INTERVAL_SECONDS:
+            return
+
+        success, detail = self.sender(state)
+        self.last_attempt = now
+        self.attempts += 1
+        emit(
+            "LAUNCHER_CTA_WATCHDOG_ATTEMPT",
+            attempt=self.attempts,
+            max_attempts=self.MAX_ATTEMPTS,
+            success=bool(success),
+            stall_reason=stall_reason,
+            hwnd=state.get("hwnd"),
+            pid=state.get("pid"),
+            class_name=state.get("class_name"),
+            title=state.get("title"),
+            window_rect=state.get("window_rect"),
+            client_size=state.get("client_size"),
+            ready_percentage=self.observer.last_ready_percentage,
+            detail=detail,
+        )
+
+    def _run(self):
+        while not self.stop_event.wait(1):
+            try:
+                self._tick()
+            except BaseException as error:
+                emit(
+                    "LAUNCHER_CTA_WATCHDOG_ERROR",
                     error=type(error).__name__ + ": " + str(error),
                 )
 
@@ -559,6 +861,7 @@ def execute(runtime_loader=load_runtime, elevation_check=is_elevated):
     proof = None
     events = None
     observer = None
+    watchdog = None
     outcome = {
         "ok": False,
         "reason": "NOT_STARTED",
@@ -581,6 +884,8 @@ def execute(runtime_loader=load_runtime, elevation_check=is_elevated):
         events.task_done.connect(proof.on_done)
         observer = LauncherCaptureObserver(instance, launcher)
         observer.start()
+        watchdog = LauncherPrimaryCTAWatchdog(instance, launcher, observer)
+        watchdog.start()
 
         emit(
             "NATIVE_LIFECYCLE_BEGIN",
@@ -624,6 +929,8 @@ def execute(runtime_loader=load_runtime, elevation_check=is_elevated):
             message=type(error).__name__ + ": " + str(error),
         )
     finally:
+        if watchdog is not None:
+            watchdog.stop()
         if observer is not None:
             observer.stop()
         if proof is not None:
