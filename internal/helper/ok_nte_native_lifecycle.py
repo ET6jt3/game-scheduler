@@ -59,7 +59,7 @@ def is_elevated():
         return False
 
 
-def force_wgc_allowed(app_config):
+def prefer_wgc_allowed(app_config):
     windows = app_config.get("windows")
     if not isinstance(windows, dict):
         raise Failure(
@@ -68,11 +68,15 @@ def force_wgc_allowed(app_config):
             31,
         )
     previous = windows.get("capture_method")
-    windows["capture_method"] = ["WGC"]
-    return previous
+    methods = previous if isinstance(previous, list) else [previous]
+    methods = [method for method in methods if method]
+    windows["capture_method"] = ["WGC"] + [
+        method for method in methods if method != "WGC"
+    ]
+    return previous, list(windows["capture_method"])
 
 
-def force_wgc_selected(instance):
+def prefer_wgc_selected(instance):
     device_manager = getattr(instance, "device_manager", None)
     if device_manager is None:
         raise Failure(
@@ -87,7 +91,12 @@ def force_wgc_selected(instance):
             "OK-Script Windows capture configuration is unavailable",
             31,
         )
-    windows_config["capture_method"] = ["WGC"]
+    current = windows_config.get("capture_method")
+    methods = current if isinstance(current, list) else [current]
+    methods = [method for method in methods if method]
+    windows_config["capture_method"] = ["WGC"] + [
+        method for method in methods if method != "WGC"
+    ]
 
     device_config = getattr(device_manager, "config", None)
     if device_config is None:
@@ -99,7 +108,7 @@ def force_wgc_selected(instance):
     previous = device_config.get("capture")
     device_config["capture"] = "WGC"
     config_file = getattr(device_config, "config_file", None)
-    return previous, config_file
+    return previous, config_file, list(windows_config["capture_method"])
 
 
 def select_native_tasks(instance):
@@ -143,8 +152,7 @@ class LauncherCaptureObserver:
         self.snapshot_index = 0
         self.max_snapshots = 48
         self.last_stale_emit = 0.0
-        self.backend_mismatch = None
-        self.backend_mismatch_emitted = False
+        self.last_capture_method = None
         self.last_ready_percentage = None
         self.unavailable_since = None
         self.directory = None
@@ -262,16 +270,14 @@ class LauncherCaptureObserver:
         metadata = self._window_metadata(hwnd_window)
         metadata["capture_method"] = type(capture).__name__
         metadata["capture_connected"] = bool(capture.connected())
-        if metadata["capture_method"] != "WindowsGraphicsCaptureMethod":
-            self.backend_mismatch = metadata["capture_method"]
-            if not self.backend_mismatch_emitted:
-                emit(
-                    "LAUNCHER_CAPTURE_BACKEND_MISMATCH",
-                    expected="WindowsGraphicsCaptureMethod",
-                    actual=metadata["capture_method"],
-                    hwnd=metadata.get("hwnd"),
-                )
-                self.backend_mismatch_emitted = True
+        if metadata["capture_method"] != self.last_capture_method:
+            emit(
+                "LAUNCHER_CAPTURE_BACKEND",
+                previous=self.last_capture_method,
+                current=metadata["capture_method"],
+                hwnd=metadata.get("hwnd"),
+            )
+            self.last_capture_method = metadata["capture_method"]
         metadata["capture_target_signature"] = repr(
             getattr(hwnd_window, "capture_target_signature", None)
         )
@@ -792,16 +798,17 @@ def load_runtime():
     from src.config import config
     from src.patches.startup_patches import install_startup_patches
 
-    previous_allowed = force_wgc_allowed(config)
+    previous_allowed, preferred_allowed = prefer_wgc_allowed(config)
     install_startup_patches(config)
-    # Startup patches must not reintroduce fallback capture methods.
-    force_wgc_allowed(config)
+    # Keep WGC first while preserving OK-Script's native compatibility
+    # fallbacks for both launcher and game capture.
+    _, preferred_allowed = prefer_wgc_allowed(config)
 
     import ok
     from ok.core.events import communicate
 
     instance = ok.OK(config)
-    previous_selected, config_file = force_wgc_selected(instance)
+    previous_selected, config_file, runtime_allowed = prefer_wgc_selected(instance)
 
     try:
         from ok.util.window import windows_graphics_available
@@ -813,20 +820,16 @@ def load_runtime():
             31,
         )
     emit(
-        "CAPTURE_BACKEND_FORCED",
+        "CAPTURE_BACKEND_PREFERRED",
         requested="WGC",
-        allowed=["WGC"],
+        allowed=runtime_allowed,
         previous_allowed=previous_allowed,
+        preferred_allowed=preferred_allowed,
         previous_selected=previous_selected,
         config_file=config_file,
         wgc_available=wgc_available,
+        fallback_allowed=len(runtime_allowed) > 1,
     )
-    if os.name == "nt" and not wgc_available:
-        raise Failure(
-            "WGC_UNAVAILABLE",
-            "Windows Graphics Capture is not available on this Windows session",
-            31,
-        )
 
     if getattr(instance, "_app", None) is not None:
         raise Failure(
@@ -850,7 +853,8 @@ def load_runtime():
         task_class=type(task).__name__,
         launcher_class=type(launcher).__name__,
         native_launcher=True,
-        capture_backend="WGC",
+        capture_preference="WGC",
+        capture_allowed=runtime_allowed,
         capture_config_file=config_file,
     )
     return instance, task, launcher, communicate
@@ -902,19 +906,14 @@ def execute(runtime_loader=load_runtime, elevation_check=is_elevated):
         instance.run_onetime_task(task, exit_after=True)
 
         status = proof.verify()
-        if observer.backend_mismatch is not None:
-            raise Failure(
-                "CAPTURE_BACKEND_MISMATCH",
-                "Expected WGC but observed " + observer.backend_mismatch,
-                31,
-            )
         outcome.update(
             ok=True,
             reason="TASK_COMPLETED",
             status=status,
             lifecycle="native",
             launcher_owned_by="ok-nte",
-            capture_backend="WGC",
+            capture_preference="WGC",
+            capture_backend=observer.last_capture_method or "unknown",
         )
         emit("NATIVE_LIFECYCLE_COMPLETED", status=status)
         code = 0
