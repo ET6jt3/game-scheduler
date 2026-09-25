@@ -123,17 +123,18 @@ class FakeInstance:
 
 
 class Tests(unittest.TestCase):
-    def test_force_wgc_allowed_removes_bitblt_fallback(self):
+    def test_prefer_wgc_allowed_preserves_native_fallback(self):
         config = {
             "windows": {
                 "capture_method": ["WGC", "BitBlt_RenderFull"],
             }
         }
-        previous = native.force_wgc_allowed(config)
+        previous, allowed = native.prefer_wgc_allowed(config)
         self.assertEqual(previous, ["WGC", "BitBlt_RenderFull"])
-        self.assertEqual(config["windows"]["capture_method"], ["WGC"])
+        self.assertEqual(config["windows"]["capture_method"], ["WGC", "BitBlt_RenderFull"])
+        self.assertEqual(allowed, ["WGC", "BitBlt_RenderFull"])
 
-    def test_force_wgc_selected_persists_runtime_devices_config(self):
+    def test_prefer_wgc_selected_persists_runtime_preference(self):
         device_config = SavedConfig(capture="BitBlt_RenderFull")
         device_manager = types.SimpleNamespace(
             windows_capture_config={
@@ -142,13 +143,14 @@ class Tests(unittest.TestCase):
             config=device_config,
         )
         instance = types.SimpleNamespace(device_manager=device_manager)
-        previous, path = native.force_wgc_selected(instance)
+        previous, path, allowed = native.prefer_wgc_selected(instance)
         self.assertEqual(previous, "BitBlt_RenderFull")
         self.assertEqual(device_config["capture"], "WGC")
         self.assertEqual(
             device_manager.windows_capture_config["capture_method"],
-            ["WGC"],
+            ["WGC", "BitBlt_RenderFull"],
         )
+        self.assertEqual(allowed, ["WGC", "BitBlt_RenderFull"])
         self.assertEqual(path, SavedConfig.config_file)
 
     def test_selects_native_daily_and_launcher(self):
@@ -220,7 +222,7 @@ class Tests(unittest.TestCase):
         finally:
             native.emit = original_emit
 
-    def test_launcher_capture_observer_flags_non_wgc_backend(self):
+    def test_launcher_capture_observer_records_native_fallback_backend(self):
         instance = FakeInstance()
         capture = FakeCapture()
         instance.task_executor.current_task = instance.launcher
@@ -235,9 +237,9 @@ class Tests(unittest.TestCase):
         try:
             native.emit = lambda event, **data: events.append((event, data))
             observer._sample()
-            self.assertEqual(observer.backend_mismatch, "FakeCapture")
+            self.assertEqual(observer.last_capture_method, "FakeCapture")
             self.assertTrue(any(
-                event == "LAUNCHER_CAPTURE_BACKEND_MISMATCH"
+                event == "LAUNCHER_CAPTURE_BACKEND"
                 for event, _ in events
             ))
         finally:
