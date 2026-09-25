@@ -33,6 +33,12 @@ try{
  if($elevatedText -notmatch 'Portable\.ps1.*-Action Stop' -or $elevatedText -notmatch '-Verb RunAs'){
   throw 'Run-Elevated.cmd does not stop safely then request elevation'
  }
+ $startLauncher=Join-Path $first 'Start.cmd'
+ if(!(Test-Path -LiteralPath $startLauncher)){throw 'First build missing Start.cmd'}
+ $startText=Get-Content -LiteralPath $startLauncher -Raw
+ if($startText -notmatch 'WindowsBuiltInRole.*Administrator' -or $startText -notmatch 'Run-Elevated\.cmd'){
+  throw 'Start.cmd does not auto-route a non-elevated manual start through Run-Elevated.cmd'
+ }
  $before=(Get-FileHash (Join-Path $first 'App\server.exe')).Hash
  Set-Content -LiteralPath (Join-Path $first 'Data\preserve.txt') -Value 'keep existing user data'
  & .\Build.cmd
